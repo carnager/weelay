@@ -1,0 +1,27 @@
+# Secrets — never commit these
+keystore.properties
+*.jks
+*.keystore
+local.properties
+
+# Gradle / build output
+.gradle/
+build/
+app/build/
+captures/
+.cxx/
+.externalNativeBuild/
+
+# Kotlin
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS / editor cruft
+.DS_Store
+*~
+*.swp
