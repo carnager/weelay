@@ -203,6 +203,10 @@ class RelayClient @Inject constructor() {
             }
         }.apply {
             connectionLostTimeout = 0 // Disabled; we use our own API-level ping
+            // Happy-eyeballs-style resolution: prefer a reachable IPv4 address. Without this,
+            // a host with both A and AAAA records whose relay only listens on IPv4 fails with
+            // ECONNREFUSED because Android picks the IPv6 address first.
+            setDnsResolver { u -> resolvePreferredAddress(u, port) }
             if (useSsl) {
                 val sslContext = SSLContext.getInstance("TLS")
                 sslContext.init(null, null, null)
@@ -210,6 +214,34 @@ class RelayClient @Inject constructor() {
             }
             connect()
         }
+    }
+
+    /**
+     * Resolve [uri]'s host to the address most likely to accept a connection: try each resolved
+     * address (IPv4 first) with a short TCP probe and return the first that connects. Falls back
+     * to the first resolved address so the real connect surfaces any error normally.
+     *
+     * Runs on the WebSocket connect thread, so the blocking probes are acceptable here.
+     */
+    private fun resolvePreferredAddress(uri: URI, port: Int): java.net.InetAddress {
+        val host = uri.host
+        val addresses = java.net.InetAddress.getAllByName(host)
+            // IPv4 first (false sorts before true)
+            .sortedBy { it !is java.net.Inet4Address }
+        for (addr in addresses) {
+            try {
+                java.net.Socket().use { probe ->
+                    probe.connect(java.net.InetSocketAddress(addr, port), 1500)
+                }
+                Log.i("RelayClient", "resolved $host:$port -> ${addr.hostAddress} (reachable)")
+                return addr
+            } catch (_: Exception) {
+                // unreachable on this address — try the next
+            }
+        }
+        val fallback = addresses.firstOrNull() ?: java.net.InetAddress.getByName(host)
+        Log.w("RelayClient", "no reachable address for $host:$port; falling back to ${fallback.hostAddress}")
+        return fallback
     }
 
     /**
