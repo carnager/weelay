@@ -109,6 +109,13 @@ class RelayClient @Inject constructor() {
     private var pingJob: Job? = null
     private var isReconnecting: Boolean = false
 
+    // Dead-connection watchdog. We ping periodically and track when we last heard anything from
+    // the server; if a healthy connection goes silent past the timeout the socket is half-open,
+    // so we force a reconnect rather than waiting for a write to eventually fail.
+    private val pingIntervalMs: Long = 20_000L
+    private val activityTimeoutMs: Long = 60_000L // > 2 ping intervals; healthy pongs reset it
+    @Volatile private var lastActivityMs: Long = 0L
+
     // Incoming WebSocket frames are processed strictly in order by a single consumer coroutine.
     // Launching a coroutine per frame (the previous approach) raced _buffers/_highlightLines.
     private val incomingMessages = Channel<String>(capacity = Channel.UNLIMITED)
@@ -162,6 +169,7 @@ class RelayClient @Inject constructor() {
             override fun onOpen(handshake: ServerHandshake) {
                 reconnectAttempt = 0
                 isReconnecting = false
+                lastActivityMs = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.CONNECTED
                 enableSync()
                 requestBuffers()
@@ -169,6 +177,8 @@ class RelayClient @Inject constructor() {
             }
 
             override fun onMessage(message: String) {
+                // Any frame (including ping responses) counts as the connection being alive.
+                lastActivityMs = System.currentTimeMillis()
                 // Hand off to the single ordered consumer; never block the WS read thread.
                 incomingMessages.trySend(message)
             }
@@ -260,18 +270,41 @@ class RelayClient @Inject constructor() {
         pingJob?.cancel()
         pingJob = scope.launch {
             while (true) {
-                delay(20_000L)
+                delay(pingIntervalMs)
                 val client = wsClient
-                if (client != null && client.isOpen) {
-                    val msg = buildJsonObject {
-                        put("request", "POST /api/ping")
-                    }
+                if (client == null || !client.isOpen) break
+
+                // Half-open detection: a live connection answers our pings, refreshing
+                // lastActivityMs. Prolonged silence means the socket is dead — reconnect.
+                if (lastActivityMs != 0L &&
+                    System.currentTimeMillis() - lastActivityMs > activityTimeoutMs
+                ) {
+                    Log.w("RelayClient", "no activity for >${activityTimeoutMs}ms; forcing reconnect")
+                    forceReconnect()
+                    break
+                }
+
+                val msg = buildJsonObject {
+                    put("request", "POST /api/ping")
+                }
+                try {
                     client.send(msg.toString())
-                } else {
+                } catch (e: Exception) {
+                    Log.w("RelayClient", "ping send failed; forcing reconnect", e)
+                    forceReconnect()
                     break
                 }
             }
         }
+    }
+
+    /** Tear down a presumed-dead socket and schedule a reconnect. */
+    private fun forceReconnect() {
+        if (explicitDisconnect || fatalError) return
+        val old = wsClient
+        wsClient = null // null first so the resulting onClose is ignored
+        try { old?.closeConnection(1000, "watchdog") } catch (_: Exception) {}
+        scheduleReconnect()
     }
 
     private fun stopPing() {

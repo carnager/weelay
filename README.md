@@ -53,6 +53,7 @@ In the app's connect screen enter the relay **host**, **port**, **password**, an
 ```bash
 ./gradlew assembleDebug      # debug APK  → app/build/outputs/apk/debug/
 ./gradlew assembleRelease    # signed release APK (see Signing below)
+./gradlew testDebugUnitTest  # run JVM unit tests
 ```
 
 You need an Android SDK; point Gradle at it with a `local.properties` containing
