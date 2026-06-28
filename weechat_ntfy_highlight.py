@@ -24,7 +24,7 @@ except ImportError:
 SCRIPT_NAME = "ntfy_highlight"
 SCRIPT_AUTHOR = "weelay"
 SCRIPT_VERSION = "1.1"
-SCRIPT_LICENSE = "MIT"
+SCRIPT_LICENSE = "GPL3"
 SCRIPT_DESC = "Send ntfy notifications on highlights with Weelay deep link"
 
 last_notification_time = 0

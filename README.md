@@ -91,3 +91,7 @@ app/src/main/java/com/weelay/app/
   `local.properties` are all gitignored.
 - Use `wss`/TLS for any relay reachable over an untrusted network — `plain` auth over `ws://`
   sends the password in the (base64-encoded, unencrypted) handshake.
+
+## License
+
+Licensed under the **GNU General Public License v3.0** — see [LICENSE](LICENSE).
