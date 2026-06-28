@@ -4,6 +4,14 @@ A modern Android client for [WeeChat](https://weechat.org/), built with Kotlin a
 
 Weelay talks to WeeChat over the **`relay api` protocol** — the JSON/WebSocket relay introduced in WeeChat 4.0 — not the legacy binary `relay weechat` protocol. It aims to be a fast, clean, chat-app-feel front end: grouped message bubbles, link previews, in-buffer search, swipe-to-reply, nick actions, highlight collection, and unread badges.
 
+## Screenshots
+
+<p align="center">
+  <img src="Screenshots/chat.png" width="30%" alt="Chat view with grouped message bubbles" />
+  <img src="Screenshots/user_actions.png" width="30%" alt="Nick actions and inline link previews" />
+  <img src="Screenshots/highlights.png" width="30%" alt="Per-buffer highlights" />
+</p>
+
 ## Features
 
 - WeeChat `relay api` over WebSocket (`ws`/`wss`), token auth
