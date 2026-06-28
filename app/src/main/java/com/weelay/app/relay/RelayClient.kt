@@ -109,6 +109,13 @@ class RelayClient @Inject constructor() {
     private var pingJob: Job? = null
     private var isReconnecting: Boolean = false
 
+    // Dead-connection watchdog. We ping periodically and track when we last heard anything from
+    // the server; if a healthy connection goes silent past the timeout the socket is half-open,
+    // so we force a reconnect rather than waiting for a write to eventually fail.
+    private val pingIntervalMs: Long = 20_000L
+    private val activityTimeoutMs: Long = 60_000L // > 2 ping intervals; healthy pongs reset it
+    @Volatile private var lastActivityMs: Long = 0L
+
     // Incoming WebSocket frames are processed strictly in order by a single consumer coroutine.
     // Launching a coroutine per frame (the previous approach) raced _buffers/_highlightLines.
     private val incomingMessages = Channel<String>(capacity = Channel.UNLIMITED)
@@ -162,6 +169,7 @@ class RelayClient @Inject constructor() {
             override fun onOpen(handshake: ServerHandshake) {
                 reconnectAttempt = 0
                 isReconnecting = false
+                lastActivityMs = System.currentTimeMillis()
                 _connectionState.value = ConnectionState.CONNECTED
                 enableSync()
                 requestBuffers()
@@ -169,6 +177,8 @@ class RelayClient @Inject constructor() {
             }
 
             override fun onMessage(message: String) {
+                // Any frame (including ping responses) counts as the connection being alive.
+                lastActivityMs = System.currentTimeMillis()
                 // Hand off to the single ordered consumer; never block the WS read thread.
                 incomingMessages.trySend(message)
             }
@@ -193,6 +203,10 @@ class RelayClient @Inject constructor() {
             }
         }.apply {
             connectionLostTimeout = 0 // Disabled; we use our own API-level ping
+            // Happy-eyeballs-style resolution: prefer a reachable IPv4 address. Without this,
+            // a host with both A and AAAA records whose relay only listens on IPv4 fails with
+            // ECONNREFUSED because Android picks the IPv6 address first.
+            setDnsResolver { u -> resolvePreferredAddress(u, port) }
             if (useSsl) {
                 val sslContext = SSLContext.getInstance("TLS")
                 sslContext.init(null, null, null)
@@ -200,6 +214,34 @@ class RelayClient @Inject constructor() {
             }
             connect()
         }
+    }
+
+    /**
+     * Resolve [uri]'s host to the address most likely to accept a connection: try each resolved
+     * address (IPv4 first) with a short TCP probe and return the first that connects. Falls back
+     * to the first resolved address so the real connect surfaces any error normally.
+     *
+     * Runs on the WebSocket connect thread, so the blocking probes are acceptable here.
+     */
+    private fun resolvePreferredAddress(uri: URI, port: Int): java.net.InetAddress {
+        val host = uri.host
+        val addresses = java.net.InetAddress.getAllByName(host)
+            // IPv4 first (false sorts before true)
+            .sortedBy { it !is java.net.Inet4Address }
+        for (addr in addresses) {
+            try {
+                java.net.Socket().use { probe ->
+                    probe.connect(java.net.InetSocketAddress(addr, port), 1500)
+                }
+                Log.i("RelayClient", "resolved $host:$port -> ${addr.hostAddress} (reachable)")
+                return addr
+            } catch (_: Exception) {
+                // unreachable on this address — try the next
+            }
+        }
+        val fallback = addresses.firstOrNull() ?: java.net.InetAddress.getByName(host)
+        Log.w("RelayClient", "no reachable address for $host:$port; falling back to ${fallback.hostAddress}")
+        return fallback
     }
 
     /**
@@ -260,18 +302,41 @@ class RelayClient @Inject constructor() {
         pingJob?.cancel()
         pingJob = scope.launch {
             while (true) {
-                delay(20_000L)
+                delay(pingIntervalMs)
                 val client = wsClient
-                if (client != null && client.isOpen) {
-                    val msg = buildJsonObject {
-                        put("request", "POST /api/ping")
-                    }
+                if (client == null || !client.isOpen) break
+
+                // Half-open detection: a live connection answers our pings, refreshing
+                // lastActivityMs. Prolonged silence means the socket is dead — reconnect.
+                if (lastActivityMs != 0L &&
+                    System.currentTimeMillis() - lastActivityMs > activityTimeoutMs
+                ) {
+                    Log.w("RelayClient", "no activity for >${activityTimeoutMs}ms; forcing reconnect")
+                    forceReconnect()
+                    break
+                }
+
+                val msg = buildJsonObject {
+                    put("request", "POST /api/ping")
+                }
+                try {
                     client.send(msg.toString())
-                } else {
+                } catch (e: Exception) {
+                    Log.w("RelayClient", "ping send failed; forcing reconnect", e)
+                    forceReconnect()
                     break
                 }
             }
         }
+    }
+
+    /** Tear down a presumed-dead socket and schedule a reconnect. */
+    private fun forceReconnect() {
+        if (explicitDisconnect || fatalError) return
+        val old = wsClient
+        wsClient = null // null first so the resulting onClose is ignored
+        try { old?.closeConnection(1000, "watchdog") } catch (_: Exception) {}
+        scheduleReconnect()
     }
 
     private fun stopPing() {

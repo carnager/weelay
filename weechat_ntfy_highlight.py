@@ -10,6 +10,7 @@
 #   server_url  — ntfy server URL (default: https://ntfy.sh)
 #   topic       — ntfy topic name; CHANGE THIS to something private/unguessable,
 #                 since anyone who knows the topic can read your highlight contents
+#   token       — ntfy access token for protected topics (sent as Bearer auth; default: "")
 #   ignore_buffers — comma-separated buffer names to ignore (default: "")
 #   min_interval — minimum seconds between notifications (default: 5)
 
@@ -32,6 +33,7 @@ last_notification_time = 0
 DEFAULTS = {
     "server_url": "https://ntfy.sh",
     "topic": "weechat-CHANGE-ME",
+    "token": "",  # ntfy access token for protected topics (sent as Bearer auth)
     "ignore_buffers": "",
     "min_interval": "5",
 }
@@ -61,11 +63,17 @@ def send_ntfy(topic, title, body, deep_link, tag):
         ],
     })
 
+    httpheader = "Content-Type: application/json"
+    token = config_get("token") or DEFAULTS["token"]
+    if token:
+        # Use a private/auth-protected topic so highlight contents aren't world-readable.
+        httpheader += "\nAuthorization: Bearer {}".format(token)
+
     hook = weechat.hook_process_hashtable(
         "url:{}".format(url),
         {
             "postfields": payload,
-            "httpheader": "Content-Type: application/json",
+            "httpheader": httpheader,
         },
         10000,
         "notify_cb",
