@@ -20,9 +20,17 @@ Weelay talks to WeeChat over the **`relay api` protocol** — the JSON/WebSocket
 - In-buffer search with match navigation
 - Swipe to reply, swipe for nick actions (query, whois, ban, kick, quiet)
 - Highlight collection (per-buffer and global)
-- Unread badges per buffer; live connection-status banner
-- Foreground service keeps the relay connected; high-importance notifications for highlights and private messages
-- Optional companion WeeChat script (`weechat_ntfy_highlight.py`) that pushes highlights/DMs via [ntfy](https://ntfy.sh/) with deep links back into the app
+- Unread badges driven by WeeChat's own hotlist, with highlights badged separately; opening a
+  buffer marks it read in WeeChat so the desktop client stays in sync
+- Live connection-status banner
+- Foreground service keeps the relay connected, reconnecting indefinitely with backoff and
+  immediately when the device changes network
+- High-importance notifications for highlights and private messages, with conversation history,
+  inline reply, mark-as-read, and tap-to-open-the-buffer
+- Optional companion WeeChat script (`weechat_ntfy_highlight.py`) that pushes highlights/DMs via
+  [ntfy](https://ntfy.sh/) with deep links back into the app. By default it only pushes while no
+  relay client is attached, so it covers the case the app can't (not running) without doubling up
+  on notifications when it is
 
 ## Requirements
 

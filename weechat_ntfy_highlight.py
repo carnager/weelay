@@ -12,7 +12,13 @@
 #                 since anyone who knows the topic can read your highlight contents
 #   token       — ntfy access token for protected topics (sent as Bearer auth; default: "")
 #   ignore_buffers — comma-separated buffer names to ignore (default: "")
-#   min_interval — minimum seconds between notifications (default: 5)
+#   min_interval — minimum seconds between notifications *per buffer* (default: 5)
+#   icon_url    — URL of a PNG/JPEG shown beside the notification text (default: "")
+#   priority_highlight — ntfy priority 1-5 for channel highlights (default: 4)
+#   priority_dm — ntfy priority 1-5 for private messages (default: 5)
+#   only_when_away — "on" to skip pushes while a Weelay/api relay client is
+#                 connected, since the app posts its own notification then
+#                 (default: "on")
 
 import weechat
 import json
@@ -24,11 +30,13 @@ except ImportError:
 
 SCRIPT_NAME = "ntfy_highlight"
 SCRIPT_AUTHOR = "weelay"
-SCRIPT_VERSION = "1.1"
+SCRIPT_VERSION = "1.2"
 SCRIPT_LICENSE = "GPL3"
 SCRIPT_DESC = "Send ntfy notifications on highlights with Weelay deep link"
 
-last_notification_time = 0
+# Last push time per target buffer. Throttling globally (as this once did) meant an unrelated
+# channel highlight could silently swallow a direct message seconds later.
+last_notification_time = {}
 
 DEFAULTS = {
     "server_url": "https://ntfy.sh",
@@ -36,6 +44,10 @@ DEFAULTS = {
     "token": "",  # ntfy access token for protected topics (sent as Bearer auth)
     "ignore_buffers": "",
     "min_interval": "5",
+    "icon_url": "",
+    "priority_highlight": "4",
+    "priority_dm": "5",
+    "only_when_away": "on",
 }
 
 
@@ -43,15 +55,40 @@ def config_get(key):
     return weechat.config_get_plugin(key)
 
 
-def send_ntfy(topic, title, body, deep_link, tag):
+def relay_client_connected():
+    """
+    True while a relay client (i.e. Weelay) is attached over the api protocol.
+
+    When the app is connected it raises its own notification for the same message, so pushing as
+    well just means every highlight arrives twice. ntfy earns its keep when the app is *not*
+    running, which is exactly when this returns False.
+    """
+    infolist = weechat.infolist_get("relay", "", "")
+    if not infolist:
+        return False
+    connected = False
+    while weechat.infolist_next(infolist):
+        protocol = weechat.infolist_string(infolist, "protocol_string") or ""
+        status = weechat.infolist_string(infolist, "status_string") or ""
+        if protocol == "api" and status == "connected":
+            connected = True
+            break
+    weechat.infolist_free(infolist)
+    return connected
+
+
+def send_ntfy(topic, title, body, deep_link, tag, priority):
     server_url = config_get("server_url") or DEFAULTS["server_url"]
     url = server_url.rstrip("/")
 
-    payload = json.dumps({
+    message = {
         "topic": topic,
         "title": title,
         "message": body,
         "tags": [tag],
+        # Priority drives whether Android shows a heads-up popup and how it alerts, which is the
+        # one lever ntfy gives us to make a DM feel different from a channel mention.
+        "priority": priority,
         "click": deep_link,
         "actions": [
             {
@@ -61,7 +98,13 @@ def send_ntfy(topic, title, body, deep_link, tag):
                 "clear": True,
             }
         ],
-    })
+    }
+
+    icon_url = config_get("icon_url") or DEFAULTS["icon_url"]
+    if icon_url:
+        message["icon"] = icon_url
+
+    payload = json.dumps(message)
 
     httpheader = "Content-Type: application/json"
     token = config_get("token") or DEFAULTS["token"]
@@ -81,26 +124,51 @@ def send_ntfy(topic, title, body, deep_link, tag):
     )
 
 
-def on_highlight(data, signal, signal_data):
-    global last_notification_time
-
-    now = time.time()
+def should_send(target):
+    """Per-buffer rate limit plus the "only when the app isn't attached" gate."""
+    if config_get("only_when_away") != "off" and relay_client_connected():
+        return False
     min_interval = int(config_get("min_interval") or "5")
-    if now - last_notification_time < min_interval:
+    last = last_notification_time.get(target, 0)
+    return (time.time() - last) >= min_interval
+
+
+NICK_PREFIX_CHARS = "@+%~&!"
+
+
+def on_print(data, buffer, date, tags, displayed, highlight, prefix, message):
+    """
+    Called for every printed line.
+
+    hook_print is used rather than a signal because it is the only hook that reports the
+    highlight flag, the line's tags and the buffer together — which is exactly what deciding
+    "is this worth waking the phone for" needs. (The signals this script used to hook,
+    irc_highlight and irc_privmsg, do not exist; the real ones deliver a display string that
+    irc_message_parse cannot read.)
+    """
+    if not int(displayed or "0"):
         return weechat.WEECHAT_RC_OK
 
-    msg = weechat.info_get_hashtable(
-        "irc_message_parse", {"message": signal_data}
-    )
-    if not msg:
+    tag_list = tags.split(",") if tags else []
+
+    # Never notify for our own messages.
+    if "self_msg" in tag_list:
         return weechat.WEECHAT_RC_OK
 
-    nick = msg.get("nick", "")
-    channel = msg.get("channel", "")
-    text = msg.get("text", "")
-    network = signal.split(",")[0] if "," in signal else ""
+    # Only real chat lines. notify_none is WeeChat marking a line as explicitly not a message
+    # (joins, backlog markers, mode changes), so it must be excluded rather than prefix-matched.
+    if not any(t in tag_list for t in
+               ("notify_message", "notify_private", "notify_highlight")):
+        return weechat.WEECHAT_RC_OK
 
-    if not nick or not text:
+    full_name = weechat.buffer_get_string(buffer, "full_name")
+    buf_type = weechat.buffer_get_string(buffer, "localvar_type")
+    network = weechat.buffer_get_string(buffer, "localvar_server")
+    short_name = weechat.buffer_get_string(buffer, "short_name") or full_name
+
+    is_highlight = str(highlight) == "1"
+    is_private = buf_type == "private"
+    if not (is_highlight or is_private):
         return weechat.WEECHAT_RC_OK
 
     ignore_buffers = [
@@ -108,56 +176,38 @@ def on_highlight(data, signal, signal_data):
         for b in (config_get("ignore_buffers") or "").split(",")
         if b.strip()
     ]
-    if channel in ignore_buffers:
+    if short_name in ignore_buffers or full_name in ignore_buffers:
         return weechat.WEECHAT_RC_OK
 
-    buffer_full_name = "irc.{}.{}".format(network, channel) if network else channel
+    # The prefix carries colour codes and an IRC mode char; neither belongs in a notification.
+    nick = weechat.string_remove_color(prefix, "").strip().lstrip(NICK_PREFIX_CHARS)
+    text = weechat.string_remove_color(message, "")
+    if not text:
+        return weechat.WEECHAT_RC_OK
+
+    if not should_send(full_name):
+        return weechat.WEECHAT_RC_OK
+
     topic = config_get("topic") or DEFAULTS["topic"]
-    title = "{} in {}".format(nick, channel) if channel.startswith("#") else nick
+    # ntfy renders the topic on its own line above the title, so the title has to carry the
+    # identifying detail — who said it and where — or every push looks alike in the shade.
+    if is_private:
+        title = "{} · DM".format(nick or short_name)
+        tag = "envelope"
+        priority = int(config_get("priority_dm") or DEFAULTS["priority_dm"])
+    else:
+        title = "{} · {}".format(nick, short_name)
+        tag = "speech_balloon"
+        priority = int(config_get("priority_highlight") or DEFAULTS["priority_highlight"])
+    if network:
+        title += " ({})".format(network)
+
     body = text if len(text) <= 300 else text[:297] + "..."
-    deep_link = "weelay://chat/{}".format(url_quote(buffer_full_name, safe="."))
+    deep_link = "weelay://chat/{}".format(url_quote(full_name, safe="."))
 
-    send_ntfy(topic, title, body, deep_link, "speech_balloon")
+    send_ntfy(topic, title, body, deep_link, tag, priority)
 
-    last_notification_time = now
-    return weechat.WEECHAT_RC_OK
-
-
-def on_privmsg(data, signal, signal_data):
-    global last_notification_time
-
-    now = time.time()
-    min_interval = int(config_get("min_interval") or "5")
-    if now - last_notification_time < min_interval:
-        return weechat.WEECHAT_RC_OK
-
-    msg = weechat.info_get_hashtable(
-        "irc_message_parse", {"message": signal_data}
-    )
-    if not msg:
-        return weechat.WEECHAT_RC_OK
-
-    nick = msg.get("nick", "")
-    channel = msg.get("channel", "")
-    text = msg.get("text", "")
-    network = signal.split(",")[0] if "," in signal else ""
-
-    own_nick = weechat.info_get("irc_nick", network)
-    if channel != own_nick:
-        return weechat.WEECHAT_RC_OK
-
-    if not nick or not text:
-        return weechat.WEECHAT_RC_OK
-
-    buffer_full_name = "irc.{}.{}".format(network, nick) if network else nick
-    topic = config_get("topic") or DEFAULTS["topic"]
-    title = "DM from {}".format(nick)
-    body = text if len(text) <= 300 else text[:297] + "..."
-    deep_link = "weelay://chat/{}".format(url_quote(buffer_full_name, safe="."))
-
-    send_ntfy(topic, title, body, deep_link, "envelope")
-
-    last_notification_time = now
+    last_notification_time[full_name] = time.time()
     return weechat.WEECHAT_RC_OK
 
 
@@ -176,8 +226,8 @@ if __name__ == "__main__":
             if not weechat.config_is_set_plugin(key):
                 weechat.config_set_plugin(key, default)
 
-        weechat.hook_signal("*,irc_highlight", "on_highlight", "")
-        weechat.hook_signal("*,irc_privmsg", "on_privmsg", "")
+        # Fires for every printed line; on_print does the filtering.
+        weechat.hook_print("", "", "", 1, "on_print", "")
 
         weechat.prnt("", "{} {} loaded — notifications via {}".format(
             SCRIPT_NAME, SCRIPT_VERSION,
