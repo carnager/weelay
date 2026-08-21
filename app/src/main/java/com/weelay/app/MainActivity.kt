@@ -1,12 +1,17 @@
 package com.weelay.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -48,6 +53,26 @@ class MainActivity : ComponentActivity() {
     private val pendingBuffer = mutableStateOf<String?>(null)
     private val deepLinkTrigger = mutableStateOf(0)
 
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.i("Weelay", "POST_NOTIFICATIONS granted=$granted")
+        }
+
+    /**
+     * On Android 13+ POST_NOTIFICATIONS is a runtime permission. Without it the foreground service
+     * still runs, but every highlight and private-message notification is silently dropped — so
+     * ask for it up front rather than letting notifications appear broken.
+     */
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     private fun handleDeepLink(uri: Uri?) {
         Log.w("Weelay", "handleDeepLink: $uri")
         if (uri?.scheme == "weelay" && uri.host == "chat") {
@@ -70,6 +95,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        ensureNotificationPermission()
         handleDeepLink(intent.data)
 
         lifecycleScope.launch {

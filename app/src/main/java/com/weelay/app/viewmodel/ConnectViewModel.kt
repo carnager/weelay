@@ -1,10 +1,12 @@
 package com.weelay.app.viewmodel
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.weelay.app.data.ConnectionPrefs
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.RelayClient
+import com.weelay.app.service.RelayService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,7 @@ data class ConnectUiState(
 
 @HiltViewModel
 class ConnectViewModel @Inject constructor(
+    private val application: Application,
     private val relayClient: RelayClient,
     private val connectionPrefs: ConnectionPrefs
 ) : ViewModel() {
@@ -106,7 +109,9 @@ class ConnectViewModel @Inject constructor(
             useSsl = state.useSsl
         )
 
-        relayClient.connect(
+        // The service owns the connection so it survives the app being backgrounded.
+        RelayService.start(
+            context = application,
             host = state.host.trim(),
             port = port,
             password = state.password,
