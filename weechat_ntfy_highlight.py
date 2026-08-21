@@ -16,9 +16,10 @@
 #   icon_url    — URL of a PNG/JPEG shown beside the notification text (default: "")
 #   priority_highlight — ntfy priority 1-5 for channel highlights (default: 4)
 #   priority_dm — ntfy priority 1-5 for private messages (default: 5)
-#   only_when_away — "on" to skip pushes while a Weelay/api relay client is
-#                 connected, since the app posts its own notification then
-#                 (default: "on")
+#   only_when_app_disconnected — "on" (default) to push only while no Weelay/api
+#                 relay client is attached. Nothing to do with WeeChat's /away
+#                 status: when the app holds a relay connection it raises its own
+#                 notification, so pushing as well would notify you twice.
 
 import weechat
 import json
@@ -47,7 +48,7 @@ DEFAULTS = {
     "icon_url": "",
     "priority_highlight": "4",
     "priority_dm": "5",
-    "only_when_away": "on",
+    "only_when_app_disconnected": "on",
 }
 
 
@@ -126,7 +127,7 @@ def send_ntfy(topic, title, body, deep_link, tag, priority):
 
 def should_send(target):
     """Per-buffer rate limit plus the "only when the app isn't attached" gate."""
-    if config_get("only_when_away") != "off" and relay_client_connected():
+    if config_get("only_when_app_disconnected") != "off" and relay_client_connected():
         return False
     min_interval = int(config_get("min_interval") or "5")
     last = last_notification_time.get(target, 0)
