@@ -3,6 +3,7 @@ package com.weelay.app.viewmodel
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.weelay.app.data.ConnectionPrefs
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.MessageFormat
 import com.weelay.app.relay.RelayClient
@@ -15,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -28,7 +30,11 @@ data class DisplayMessage(
     val time: String,
     val rawDate: String,
     val nick: String,
-    val isOwnMessage: Boolean
+    val isOwnMessage: Boolean,
+    /** This message mentioned the user — rendered with a distinct bubble in the chat. */
+    val isMention: Boolean = false,
+    /** A /me action. WeeChat sends these with prefix "*" and the nick inside the message. */
+    val isAction: Boolean = false
 )
 
 data class MessageGroup(
@@ -46,7 +52,8 @@ data class MessageGroup(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val relayClient: RelayClient
+    private val relayClient: RelayClient,
+    private val connectionPrefs: ConnectionPrefs
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
@@ -66,6 +73,9 @@ class ChatViewModel @Inject constructor(
     private var currentBufferFullName: String = ""
     private var currentBufferId: Long = -1
     private var ownNick: String = ""
+
+    // Compiled lazily and reset whenever the buffer (and so the nick) changes; see mentionPatterns.
+    private var mentionPatternsCache: List<Regex>? = null
     private val allLines = mutableListOf<RelayLine>()
 
     // Incrementally-maintained derived state, kept in sync with allLines so that a single
@@ -90,6 +100,15 @@ class ChatViewModel @Inject constructor(
 
     private val _loadedMoreHistory = MutableStateFlow(false)
     val loadedMoreHistory: StateFlow<Boolean> = _loadedMoreHistory.asStateFlow()
+
+    /**
+     * False once the server has no older lines to give. The relay only serves what WeeChat holds
+     * in memory — it never reads the log files — so after a WeeChat restart that can be as little
+     * as `logger.look.backlog` lines per buffer. Without this the "load earlier messages" button
+     * stayed put and silently did nothing.
+     */
+    private val _hasMoreHistory = MutableStateFlow(true)
+    val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
 
     private val _highlights = MutableStateFlow<List<HighlightItem>>(emptyList())
     val highlights: StateFlow<List<HighlightItem>> = _highlights.asStateFlow()
@@ -116,25 +135,33 @@ class ChatViewModel @Inject constructor(
         _initialLoadComplete.value = false
         autoFetchingMore = false
         currentLineCount = 500
+        _hasMoreHistory.value = true
 
         val buffer = relayClient.buffers.value.find { it.fullName == bufferFullName }
         if (buffer != null) {
             currentBufferId = buffer.id
             _bufferName.value = buffer.shortName ?: buffer.name
             ownNick = buffer.localVariables["nick"] ?: ""
+            mentionPatternsCache = null
         } else {
             _bufferName.value = bufferFullName.substringAfterLast(".")
         }
 
-        // Watch for incoming lines (history + real-time) — start collecting BEFORE requesting
+        // Watch for incoming lines (history + real-time). The history request is issued from
+        // onSubscription, which runs once this collector is registered on the shared flow — so the
+        // response can't be emitted before we're listening. (This previously relied on a 50ms
+        // delay, which was a race: on a slow frame the backlog was simply dropped.)
         bufferJobs += viewModelScope.launch {
-            relayClient.lines.collect { update ->
+            relayClient.lines.onSubscription {
+                relayClient.requestLines(bufferFullName, currentLineCount)
+            }.collect { update ->
                 if (update.bufferName != currentBufferFullName) return@collect
                 val displayed = update.lines.filter { it.displayed }
                 if (update.isHistory) {
-                    // A history batch replaces the whole buffer.
-                    allLines.clear()
-                    allLines.addAll(displayed)
+                    // Fewer lines back than we asked for means we've reached the oldest line the
+                    // server still has in memory, so there is nothing left to page in.
+                    _hasMoreHistory.value = update.lines.size >= currentLineCount
+                    mergeHistory(displayed)
                     rebuildDerivedState(allowAutoFetch = true)
                 } else {
                     // Live lines append incrementally.
@@ -152,23 +179,17 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // Watch for nicklist updates
+        // Watch for nicklist updates, requesting once subscribed for the same reason as above.
         bufferJobs += viewModelScope.launch {
-            relayClient.nicklist.collect { (bufferName, nicks) ->
+            relayClient.nicklist.onSubscription {
+                relayClient.requestNicklist(bufferFullName)
+            }.collect { (bufferName, nicks) ->
                 if (bufferName == currentBufferFullName) {
                     _nicklist.value = nicks
                         .filter { it.visible }
                         .sortedBy { it.name.lowercase() }
                 }
             }
-        }
-
-        // Request history and nicklist after collectors are active
-        // Small delay to ensure coroutine collectors are subscribed
-        bufferJobs += viewModelScope.launch {
-            delay(50)
-            relayClient.requestLines(bufferFullName, currentLineCount)
-            relayClient.requestNicklist(bufferFullName)
         }
 
         // Re-request data when connection recovers (e.g. after phone idle)
@@ -205,8 +226,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun loadMoreHistory() {
+        if (!_hasMoreHistory.value) return
         previousMessageCount = allLines.size
-        currentLineCount += 100
+        // Step in larger strides: the relay can only widen the window from "now", so a 100-line
+        // bump costs a full refetch to gain very little.
+        currentLineCount += 500
         _loadedMoreHistory.value = true
         relayClient.requestLines(currentBufferFullName, currentLineCount)
     }
@@ -247,16 +271,56 @@ class ChatViewModel @Inject constructor(
 
     /** Map a relay line to a display message (caller has already filtered with isRegularMessage). */
     private fun toDisplayMessage(line: RelayLine): DisplayMessage {
-        val nick = extractNick(line.prefix)
+        val isAction = MessageFormat.isAction(line)
+        val text = MessageFormat.stripIrcFormatting(line.message)
+        // An action's prefix is just "*", so the speaker has to come from the nick_ tag (or, for
+        // lines restored from the log where tags are gone, the leading word of the message).
+        val nick = if (isAction) {
+            MessageFormat.actionNick(line, text)
+        } else {
+            extractNick(line.prefix)
+        }
         val isOwn = nick == ownNick || line.tags.any { it == "nick_$ownNick" }
         return DisplayMessage(
             id = line.id,
-            text = MessageFormat.stripIrcFormatting(line.message),
+            text = text,
             time = formatMessageTime(line.date),
             rawDate = line.date,
             nick = nick,
-            isOwnMessage = isOwn
+            isOwnMessage = isOwn,
+            isMention = !isOwn && (line.highlight || mentionsOwnNick(text)),
+            isAction = isAction
         )
+    }
+
+    /**
+     * Fallback mention detection for lines WeeChat didn't flag.
+     *
+     * Lines restored from the log on a WeeChat restart always come back with highlight=false —
+     * the highlight was evaluated when they were first printed, and re-reading the log doesn't
+     * re-evaluate it. Without this, every mention older than the last restart looks like ordinary
+     * chat. Matches the nick as a whole word so "rasika" doesn't count as a mention of "rasi".
+     */
+    private fun mentionsOwnNick(text: String): Boolean =
+        mentionPatterns().any { it.containsMatchIn(text) }
+
+    /**
+     * Matchers for the nick plus any configured highlight words, built once per buffer load.
+     * WeeChat's own highlight config can't be read over the relay api, so the extra words come
+     * from the app's settings.
+     */
+    private fun mentionPatterns(): List<Regex> {
+        mentionPatternsCache?.let { return it }
+        val words = buildList {
+            if (ownNick.isNotEmpty()) add(ownNick)
+            connectionPrefs.highlightWords
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .forEach { add(it) }
+        }
+        return words.map { MessageFormat.nickMentionRegex(it) }
+            .also { mentionPatternsCache = it }
     }
 
     /**
@@ -275,7 +339,11 @@ class ChatViewModel @Inject constructor(
         } else 0L
         val showTimeSeparator = timeDiffMinutes > groupGapMinutes
 
-        if (last != null && msg.nick == last.nick && !showTimeSeparator) {
+        // Actions stand alone: they read as "* nick does something", so folding them into a
+        // neighbouring group under that group's nick header would misattribute them.
+        val groupable = !msg.isAction && last?.messages?.lastOrNull()?.isAction != true
+
+        if (groupable && last != null && msg.nick == last.nick && !showTimeSeparator) {
             // Extend the current group.
             groups[groups.size - 1] = last.copy(messages = last.messages + msg)
         } else {
@@ -296,6 +364,32 @@ class ChatViewModel @Inject constructor(
 
         urlPattern.findAll(msg.text).forEach { match ->
             collectedUrls.add(match.value to msg.nick)
+        }
+    }
+
+    /**
+     * Fold a fetched history batch into [allLines], keyed by line id.
+     *
+     * A history response is a window ending at "now", so it overlaps almost entirely with what we
+     * already have; replacing wholesale meant every "load more" and every reconnect threw away and
+     * re-grouped the full history. Merging keeps live lines that arrived while the fetch was in
+     * flight — those aren't in the response and used to vanish until the next sync line.
+     */
+    private fun mergeHistory(history: List<RelayLine>) {
+        if (history.isEmpty()) return
+
+        val merged = LinkedHashMap<Long, RelayLine>(allLines.size + history.size)
+        // History first so it forms the base ordering, then live lines already held are layered on
+        // top; ids collide for the overlap, which is exactly the dedup we want.
+        for (line in history) merged[line.id] = line
+        for (line in allLines) merged[line.id] = line
+
+        allLines.clear()
+        allLines.addAll(merged.values.sortedBy { it.id })
+
+        // Merging can push us past the retention cap (a bigger window plus lines held from before).
+        if (allLines.size > maxRetainedLines) {
+            repeat(allLines.size - retainAfterTrim) { allLines.removeAt(0) }
         }
     }
 

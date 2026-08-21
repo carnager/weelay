@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -68,12 +69,15 @@ fun MessageBubble(
         )
     }
 
-    // WhatsApp-like colors: green tint for own, light grey for others
-    val bubbleColor = if (isOwnMessage) {
-        Color(0xFF005C4B) // WhatsApp dark green
-    } else {
-        Color(0xFF1F2C34) // WhatsApp dark grey bubble
+    // WhatsApp-like colors: green tint for own, light grey for others. A message that mentioned
+    // the user gets a warmer bubble so it's findable while scrolling, not just via the buffer
+    // list badge.
+    val bubbleColor = when {
+        isOwnMessage -> Color(0xFF005C4B) // WhatsApp dark green
+        message.isMention -> Color(0xFF3D3323) // amber-tinted dark for mentions
+        else -> Color(0xFF1F2C34) // WhatsApp dark grey bubble
     }
+    val mentionAccent = Color(0xFFFFB300)
 
     val textColor = Color(0xFFE9EDEF) // Light text for dark bubbles
     val timeColor = Color(0xFF8696A0) // Muted grey for timestamps
@@ -83,8 +87,28 @@ fun MessageBubble(
 
     val searchHighlightColor = Color(0xFFFFD54F) // Yellow highlight for search matches
 
-    val annotatedText = remember(message.text, searchQuery) {
+    val annotatedText = remember(message.text, searchQuery, message.isAction, nickColorValue) {
         buildAnnotatedString {
+            // An action reads as one sentence — "* nick does something" — so it gets a leading
+            // star and the acting nick coloured inline, rather than a nick header above a bubble
+            // whose speaker would show as a bare "*".
+            if (message.isAction) {
+                withStyle(SpanStyle(color = nickColorValue, fontWeight = FontWeight.SemiBold)) {
+                    append("* ")
+                }
+                val text = message.text
+                val nickEnd = if (text.startsWith(nick)) nick.length else 0
+                if (nickEnd > 0) {
+                    withStyle(SpanStyle(color = nickColorValue, fontWeight = FontWeight.SemiBold)) {
+                        append(text.substring(0, nickEnd))
+                    }
+                }
+                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+                    append(text.substring(nickEnd))
+                }
+                return@buildAnnotatedString
+            }
+
             val text = message.text
             // Build a list of styled ranges: URLs and search matches
             data class StyledRange(val start: Int, val end: Int, val type: String, val value: String)
@@ -136,8 +160,14 @@ fun MessageBubble(
             modifier = Modifier
                 .widthIn(min = 0.dp)
                 .then(
-                    if (isHighlighted) Modifier.border(1.5.dp, Color(0xFFFFD54F), bubbleShape)
-                    else Modifier
+                    // The jump-target outline (from the highlights sheet) is transient and wins;
+                    // the mention outline is a permanent property of the message.
+                    when {
+                        isHighlighted -> Modifier.border(1.5.dp, Color(0xFFFFD54F), bubbleShape)
+                        message.isMention && !isOwnMessage ->
+                            Modifier.border(1.dp, mentionAccent, bubbleShape)
+                        else -> Modifier
+                    }
                 )
         ) {
             Column(
@@ -148,7 +178,7 @@ fun MessageBubble(
                     bottom = 5.dp
                 )
             ) {
-                if (isFirstInGroup) {
+                if (isFirstInGroup && !message.isAction) {
                     Text(
                         text = nick,
                         style = MaterialTheme.typography.labelSmall.copy(

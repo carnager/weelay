@@ -7,6 +7,136 @@ import org.junit.Test
 
 class MessageFormatTest {
 
+    @Test
+    fun isRegularMessage_rejectsLoggerBacklogMarker() {
+        // WeeChat's logger prints this into every buffer on restart. It is displayed, so the only
+        // thing distinguishing it from chat is notify_none — which a "notify_" prefix test used to
+        // accept, making "End of backlog" the last-message preview for every channel at once.
+        val line = RelayLine(
+            prefix = "===",
+            message = "========== End of backlog (20 lines) ==========",
+            tags = listOf("no_highlight", "notify_none", "logger_backlog_end"),
+            displayed = true
+        )
+        assertFalse(MessageFormat.isRegularMessage(line))
+    }
+
+    @Test
+    fun isAction_detectedByTagAndByPrefix() {
+        val live = RelayLine(
+            prefix = "*",
+            message = "tribly schiebt den regen zu demonicmaniac1",
+            tags = listOf("irc_privmsg", "irc_action", "notify_message", "nick_tribly"),
+            displayed = true
+        )
+        assertTrue(MessageFormat.isAction(live))
+        // Restored from the log, tags gone — only the prefix is left to go on.
+        val restored = live.copy(tags = listOf("logger_backlog", "no_highlight", "notify_none"))
+        assertTrue(MessageFormat.isAction(restored))
+    }
+
+    @Test
+    fun actionsSurviveTheSystemLineFilter() {
+        // "*" must not be treated as a system prefix, or actions vanish from restored backlog.
+        val restored = RelayLine(
+            prefix = "*",
+            message = "tribly waves",
+            tags = listOf("logger_backlog", "no_highlight", "notify_none"),
+            displayed = true
+        )
+        assertTrue(MessageFormat.isRegularMessage(restored))
+    }
+
+    @Test
+    fun actionNick_prefersTagAndFallsBackToLeadingWord() {
+        val tagged = RelayLine(
+            prefix = "*",
+            message = "tribly waves",
+            tags = listOf("irc_action", "nick_tribly"),
+            displayed = true
+        )
+        assertEquals("tribly", MessageFormat.actionNick(tagged, tagged.message))
+
+        val untagged = tagged.copy(tags = listOf("logger_backlog"))
+        assertEquals("tribly", MessageFormat.actionNick(untagged, untagged.message))
+    }
+
+    @Test
+    fun mentionsNick_matchesWholeWordOnly() {
+        assertTrue(MessageFormat.mentionsNick("rasi: ping", "rasi"))
+        assertTrue(MessageFormat.mentionsNick("thanks rasi", "rasi"))
+        assertTrue(MessageFormat.mentionsNick("hey RASI", "rasi"))
+        assertTrue(MessageFormat.mentionsNick("(rasi)", "rasi"))
+        // Substrings of longer nicks or words must not count.
+        assertFalse(MessageFormat.mentionsNick("rasika said hi", "rasi"))
+        assertFalse(MessageFormat.mentionsNick("brasilia", "rasi"))
+    }
+
+    @Test
+    fun mentionsNick_doesNotMatchInsideAnIrcNickWithSpecialChars() {
+        // '|' and '-' are legal in nicks, so "rasi" must not fire on someone else's "rasi|away".
+        assertFalse(MessageFormat.mentionsNick("rasi|away has left", "rasi"))
+        assertFalse(MessageFormat.mentionsNick("talk to rasi-bot", "rasi"))
+    }
+
+    @Test
+    fun mentionsNick_handlesNicksContainingRegexMetacharacters() {
+        // Nicks may contain [ ] { } \ ` | ^ — these must be escaped, not treated as a pattern.
+        assertTrue(MessageFormat.mentionsNick("hi [afk]user", "[afk]user"))
+        assertFalse(MessageFormat.mentionsNick("hi someone", "[afk]user"))
+    }
+
+    @Test
+    fun isRegularMessage_acceptsChatRestoredFromTheLog() {
+        // WeeChat tags restored backlog notify_none so that reloading history doesn't re-notify.
+        // These are real conversation and must still display, or a buffer whose contents are all
+        // restored backlog (i.e. every buffer, just after a WeeChat restart) renders empty.
+        val line = RelayLine(
+            prefix = "someone",
+            message = "a message from before the restart",
+            tags = listOf("logger_backlog", "no_highlight", "notify_none"),
+            displayed = true
+        )
+        assertTrue(MessageFormat.isRegularMessage(line))
+    }
+
+    @Test
+    fun isRegularMessage_rejectsJoinPartRestoredFromTheLog() {
+        // Restoring loses the original tags, so within backlog only the prefix distinguishes
+        // chat from join/part noise.
+        val line = RelayLine(
+            prefix = "-->",
+            message = "someone (~someone@example.org) has joined #chan",
+            tags = listOf("logger_backlog", "no_highlight", "notify_none"),
+            displayed = true
+        )
+        assertFalse(MessageFormat.isRegularMessage(line))
+    }
+
+    @Test
+    fun isRegularMessage_rejectsAnyNotifyNoneLine() {
+        val line = RelayLine(
+            prefix = "--",
+            message = "Mode #chan [+o someone] by ChanServ",
+            tags = listOf("irc_mode", "notify_none"),
+            displayed = true
+        )
+        assertFalse(MessageFormat.isRegularMessage(line))
+    }
+
+    @Test
+    fun isRegularMessage_acceptsRealNotifyLevels() {
+        for (tag in listOf("notify_message", "notify_private", "notify_highlight")) {
+            val line = RelayLine(
+                prefix = "nick",
+                message = "hello",
+                tags = listOf(tag),
+                displayed = true
+            )
+            assertTrue("expected $tag to count as a message", MessageFormat.isRegularMessage(line))
+        }
+    }
+
     // IRC control characters, named for readability.
     private val color = "\u0003"      // mIRC color introducer, optionally "fg,bg"
     private val bold = "\u0002"

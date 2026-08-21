@@ -118,6 +118,7 @@ fun ChatScreen(
     val urls by viewModel.urls.collectAsState()
     val loadedMoreHistory by viewModel.loadedMoreHistory.collectAsState()
     val initialLoadComplete by viewModel.initialLoadComplete.collectAsState()
+    val hasMoreHistory by viewModel.hasMoreHistory.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val listState = rememberLazyListState()
@@ -623,19 +624,31 @@ fun ChatScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    // Remember the currently oldest message
-                                    oldestMessageId = messages.firstOrNull()
-                                        ?.messages?.firstOrNull()?.id
-                                    viewModel.loadMoreHistory()
-                                }
+                                .then(
+                                    if (hasMoreHistory) {
+                                        Modifier.clickable {
+                                            // Remember the currently oldest message
+                                            oldestMessageId = messages.firstOrNull()
+                                                ?.messages?.firstOrNull()?.id
+                                            viewModel.loadMoreHistory()
+                                        }
+                                    } else Modifier
+                                )
                                 .padding(vertical = 12.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Load earlier messages",
+                                text = if (hasMoreHistory) {
+                                    "Load earlier messages"
+                                } else {
+                                    "Beginning of available history"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
-                                color = Color(0xFF53BDEB)
+                                color = if (hasMoreHistory) {
+                                    Color(0xFF53BDEB)
+                                } else {
+                                    Color(0xFF8696A0)
+                                }
                             )
                         }
                     }

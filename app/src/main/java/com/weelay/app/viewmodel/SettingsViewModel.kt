@@ -1,8 +1,10 @@
 package com.weelay.app.viewmodel
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import com.weelay.app.data.ConnectionPrefs
 import com.weelay.app.relay.RelayClient
+import com.weelay.app.service.RelayService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,11 +17,13 @@ data class SettingsUiState(
     val port: String = "9001",
     val password: String = "",
     val useSsl: Boolean = false,
-    val hideSpecialBuffers: Boolean = false
+    val hideSpecialBuffers: Boolean = false,
+    val highlightWords: String = ""
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
+    private val application: Application,
     private val connectionPrefs: ConnectionPrefs,
     private val relayClient: RelayClient
 ) : ViewModel() {
@@ -34,7 +38,8 @@ class SettingsViewModel @Inject constructor(
             port = saved.port,
             password = saved.password,
             useSsl = saved.useSsl,
-            hideSpecialBuffers = connectionPrefs.hideSpecialBuffers
+            hideSpecialBuffers = connectionPrefs.hideSpecialBuffers,
+            highlightWords = connectionPrefs.highlightWords
         )
     }
 
@@ -68,6 +73,12 @@ class SettingsViewModel @Inject constructor(
         relayClient.requestBuffers()
     }
 
+    fun onHighlightWordsChange(words: String) {
+        _uiState.update { it.copy(highlightWords = words) }
+        // Persisted immediately; ChatViewModel rebuilds its matchers on the next buffer load.
+        connectionPrefs.highlightWords = words
+    }
+
     fun saveAndReconnect() {
         val state = _uiState.value
         connectionPrefs.save(
@@ -77,8 +88,11 @@ class SettingsViewModel @Inject constructor(
             useSsl = state.useSsl
         )
         val port = state.port.toIntOrNull() ?: return
-        relayClient.disconnect()
-        relayClient.connect(
+        // No explicit disconnect first: that would push the client to DISCONNECTED and race the
+        // service's own shutdown against the reconnect below. RelayClient.connect() already tears
+        // down any existing socket.
+        RelayService.start(
+            context = application,
             host = state.host.trim(),
             port = port,
             password = state.password,

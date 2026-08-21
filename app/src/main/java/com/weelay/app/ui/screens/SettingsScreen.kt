@@ -241,6 +241,24 @@ fun SettingsScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = uiState.highlightWords,
+                onValueChange = viewModel::onHighlightWordsChange,
+                label = { Text("Highlight words") },
+                supportingText = {
+                    Text(
+                        "Comma-separated. Your nick always counts. " +
+                            "WeeChat's own highlight settings can't be read over the relay, " +
+                            "so mirror them here."
+                    )
+                },
+                singleLine = true,
+                colors = textFieldColors,
+                modifier = Modifier.fillMaxWidth()
+            )
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

@@ -280,8 +280,14 @@ private fun BufferListItem(
                         .padding(end = 8.dp)
                 )
                 if (buffer.unreadCount > 0) {
+                    // Highlights get their own colour so a buffer that mentioned you stands out
+                    // from one that merely has unread chatter.
                     Badge(
-                        containerColor = Color(0xFF00A884)
+                        containerColor = if (buffer.highlightCount > 0) {
+                            Color(0xFFE53935)
+                        } else {
+                            Color(0xFF00A884)
+                        }
                     ) {
                         Text(
                             text = if (buffer.unreadCount > 99) "99+" else buffer.unreadCount.toString(),
