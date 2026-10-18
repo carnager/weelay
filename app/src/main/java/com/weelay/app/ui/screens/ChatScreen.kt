@@ -114,6 +114,7 @@ import com.weelay.app.ui.components.MessageBubble
 import com.weelay.app.ui.components.NickActionSheet
 import com.weelay.app.ui.theme.nickColor
 import com.weelay.app.viewmodel.ChatViewModel
+import com.weelay.app.relay.RelayNicklistEntry
 import com.weelay.app.viewmodel.DisplayMessage
 import com.weelay.app.viewmodel.MessageGroup
 import kotlinx.coroutines.delay
@@ -421,7 +422,7 @@ fun ChatScreen(
     // Nicklist bottom sheet
     if (showNicklist) {
         NicklistSheet(
-            nicks = nicklist.map { it.name },
+            nicks = nicklist,
             onDismiss = { showNicklist = false },
             onNickClick = { nick ->
                 showNicklist = false
@@ -1169,7 +1170,7 @@ private fun TimestampSeparator(timestamp: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NicklistSheet(
-    nicks: List<String>,
+    nicks: List<RelayNicklistEntry>,
     onDismiss: () -> Unit,
     onNickClick: (String) -> Unit
 ) {
@@ -1199,7 +1200,9 @@ private fun NicklistSheet(
             LazyColumn(
                 modifier = Modifier.height(400.dp)
             ) {
-                items(items = nicks, key = { it }) { nick ->
+                items(items = nicks, key = { it.name }) { entry ->
+                    val nick = entry.name
+                    val mode = entry.prefix.trim()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1215,6 +1218,21 @@ private fun NicklistSheet(
                             drawCircle(color = color)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
+                        // Fixed-width slot so names line up whether or not a nick has a mode.
+                        Text(
+                            text = mode,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = when (mode.firstOrNull()) {
+                                '~', '&', '@' -> Color(0xFF81C784)
+                                '%' -> Color(0xFFFFB74D)
+                                '+' -> Color(0xFFFFF176)
+                                else -> Color(0xFF8696A0)
+                            },
+                            modifier = Modifier.width(14.dp)
+                        )
                         Text(
                             text = nick,
                             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),

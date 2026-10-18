@@ -228,9 +228,10 @@ class ChatViewModel @Inject constructor(
                 relayClient.requestNicklist(bufferFullName)
             }.collect { (bufferName, nicks) ->
                 if (bufferName == currentBufferFullName) {
+                    // Ranked like WeeChat's nicklist: owners, admins, ops, halfops, voiced, rest.
                     _nicklist.value = nicks
                         .filter { it.visible }
-                        .sortedBy { it.name.lowercase() }
+                        .sortedWith(compareBy({ nickRank(it.prefix) }, { it.name.lowercase() }))
                 }
             }
         }
@@ -568,3 +569,12 @@ internal fun readMarkerId(messages: List<DisplayMessage>, unread: Int): Long? {
     }
     return messages.firstOrNull()?.id ?: oldestUnread
 }
+
+/** Sort key for an IRC nick-mode prefix: higher modes first, unprefixed nicks last. */
+internal fun nickRank(prefix: String): Int {
+    val mode = prefix.trim().firstOrNull() ?: return NICK_MODE_ORDER.length
+    val rank = NICK_MODE_ORDER.indexOf(mode)
+    return if (rank >= 0) rank else NICK_MODE_ORDER.length
+}
+
+private const val NICK_MODE_ORDER = "~&@%+"
