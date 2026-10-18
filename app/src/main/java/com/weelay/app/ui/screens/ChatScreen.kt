@@ -46,6 +46,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.History
@@ -177,6 +180,7 @@ fun ChatScreen(
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
     val haptic = LocalHapticFeedback.current
     var replyToNick by remember { mutableStateOf<String?>(null) }
     var replyToMessage by remember { mutableStateOf<String?>(null) }
@@ -190,6 +194,47 @@ fun ChatScreen(
             val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = layoutInfo.totalItemsCount
             totalItems > 0 && lastVisibleItem < totalItems - 3
+        }
+    }
+
+    // Stay pinned to the bottom while content there grows. Link previews load after the list is
+    // laid out and make the last message taller, which used to leave the view stranded a little
+    // short of the newest message. Pinned once the list reaches the end; released as soon as the
+    // user scrolls away from it.
+    var stickToBottom by remember { mutableStateOf(false) }
+    val pinning = remember { booleanArrayOf(false) } // our own corrective scroll is in flight
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canScrollForward) ->
+                if (pinning[0]) return@collect
+                if (!canScrollForward) stickToBottom = true
+                else if (scrolling) stickToBottom = false
+            }
+    }
+    LaunchedEffect(listState) {
+        // How far the end of the list sits below the viewport: 0 when pinned exactly, null for an
+        // empty list, and PUSHED_OUT when growth further up pushed the last item off screen.
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            when {
+                last == null -> null
+                last.index != info.totalItemsCount - 1 -> PUSHED_OUT
+                else -> last.offset + last.size + info.afterContentPadding - info.viewportEndOffset
+            }
+        }.collect { overflow ->
+            if (overflow == null || overflow <= 0) return@collect
+            if (!stickToBottom || listState.isScrollInProgress) return@collect
+            pinning[0] = true
+            try {
+                if (overflow == PUSHED_OUT) {
+                    listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+                } else {
+                    listState.scrollBy(overflow.toFloat())
+                }
+            } finally {
+                pinning[0] = false
+            }
         }
     }
 
@@ -372,8 +417,30 @@ fun ChatScreen(
             onDismissRequest = { showTopic = false },
             title = { Text(bufferName) },
             text = {
-                SelectionContainer {
-                    Text(bufferTitle, style = MaterialTheme.typography.bodyMedium)
+                Column {
+                    SelectionContainer {
+                        Text(bufferTitle, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    // Selectable text can't also take link taps, so the topic's links get their own
+                    // rows underneath.
+                    val topicLinks = remember(bufferTitle) {
+                        TOPIC_URL.findAll(bufferTitle).map { it.value.trimEnd('.', ',', ')') }
+                            .distinct().toList()
+                    }
+                    topicLinks.forEach { url ->
+                        Text(
+                            text = url,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color(0xFF53BDEB),
+                            textDecoration = TextDecoration.Underline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { uriHandler.openUri(url) }
+                                .padding(top = 12.dp)
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -1122,6 +1189,11 @@ private fun MessageActionRow(
         Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Color(0xFFE9EDEF))
     }
 }
+
+/** Sentinel for the bottom-pinning logic: the last item was pushed out of the viewport. */
+private const val PUSHED_OUT = Int.MAX_VALUE
+
+private val TOPIC_URL = Regex("""https?://[^\s<>"{}|\\^`\[\]]+""")
 
 /**
  * LazyColumn index of the message with [id]: one item for the "load earlier" row, then per group
