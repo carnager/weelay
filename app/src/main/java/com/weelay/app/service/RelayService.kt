@@ -200,6 +200,7 @@ class RelayService : Service() {
 
     /** Connect and (re)attach the per-session collectors and the network watcher. */
     private fun startSession(host: String, port: Int, password: String, useSsl: Boolean) {
+        relayClient.pinnedCertSha256 = connectionPrefs.pinnedCertSha256
         relayClient.connect(host, port, password, useSsl)
 
         stateJob?.cancel()

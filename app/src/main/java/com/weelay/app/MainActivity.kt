@@ -8,6 +8,9 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.service.RelayService
+import com.weelay.app.ui.components.CertificateTrustDialog
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -50,6 +53,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var relayClient: RelayClient
+    @Inject lateinit var connectionPrefs: ConnectionPrefs
 
     private val pendingBuffer = mutableStateOf<String?>(null)
     private val deepLinkTrigger = mutableStateOf(0)
@@ -112,6 +116,28 @@ class MainActivity : ComponentActivity() {
         setContent {
             WeelayTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    // A refused certificate can surface on any screen (a renewed certificate shows
+                    // up on a reconnect, not only on the connect screen), so it's handled here.
+                    val untrustedCert by relayClient.untrustedCertificate.collectAsState()
+                    untrustedCert?.let { cert ->
+                        CertificateTrustDialog(
+                            certificate = cert,
+                            onTrust = {
+                                connectionPrefs.pinnedCertSha256 = cert.sha256
+                                relayClient.dismissUntrustedCertificate()
+                                val saved = connectionPrefs.load()
+                                RelayService.start(
+                                    context = this@MainActivity,
+                                    host = saved.host,
+                                    port = saved.port.toIntOrNull() ?: cert.port,
+                                    password = saved.password,
+                                    useSsl = saved.useSsl
+                                )
+                            },
+                            onDismiss = { relayClient.dismissUntrustedCertificate() }
+                        )
+                    }
+
                     val navController = rememberNavController()
                     val trigger = deepLinkTrigger.value
 

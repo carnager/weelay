@@ -32,6 +32,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
 
+/** A server certificate that failed verification, offered to the user to trust. */
+data class UntrustedCertificate(
+    val host: String,
+    val port: Int,
+    val sha256: String,
+    val subject: String,
+    val issuer: String,
+    val notAfter: java.util.Date,
+    /** True if a different certificate had been trusted for this server before. */
+    val replacesPinned: Boolean
+)
+
 enum class ConnectionState {
     DISCONNECTED,
     CONNECTING,
@@ -62,6 +74,19 @@ class RelayClient @Inject constructor() {
 
     private val _nicklist = MutableSharedFlow<Pair<String, List<RelayNicklistEntry>>>(replay = 0)
     val nicklist: SharedFlow<Pair<String, List<RelayNicklistEntry>>> = _nicklist.asSharedFlow()
+
+    /**
+     * SHA-256 fingerprint of a certificate the user chose to trust for this server, accepted in
+     * addition to the system CAs. Set by whoever starts the session, before [connect].
+     */
+    @Volatile var pinnedCertSha256: String? = null
+
+    private val _untrustedCertificate = MutableStateFlow<UntrustedCertificate?>(null)
+    val untrustedCertificate: StateFlow<UntrustedCertificate?> = _untrustedCertificate.asStateFlow()
+
+    fun dismissUntrustedCertificate() {
+        _untrustedCertificate.value = null
+    }
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
@@ -183,6 +208,9 @@ class RelayClient @Inject constructor() {
         )
         val authProtocol = "base64url.bearer.authorization.weechat.$encoded"
 
+        // Set by the trust manager during the TLS handshake if the server's certificate is refused.
+        var rejectedCert: java.security.cert.X509Certificate? = null
+
         val draft = Draft_6455(
             emptyList(),
             listOf(Protocol("api.weechat"), Protocol(authProtocol))
@@ -209,6 +237,7 @@ class RelayClient @Inject constructor() {
 
             override fun onClose(code: Int, reason: String, remote: Boolean) {
                 Log.w("RelayClient", "onClose: code=$code reason=$reason remote=$remote explicit=$explicitDisconnect state=${_connectionState.value}")
+                rejectedCert?.let { rejectCertificate(it, host, port); return }
                 if (explicitDisconnect || fatalError) return
                 if (wsClient == null) return
                 scheduleReconnect()
@@ -216,6 +245,8 @@ class RelayClient @Inject constructor() {
 
             override fun onError(ex: Exception) {
                 Log.e("RelayClient", "onError: ${ex.message} state=${_connectionState.value} explicit=$explicitDisconnect", ex)
+                // An untrusted certificate won't become trusted by retrying; stop and ask instead.
+                rejectedCert?.let { rejectCertificate(it, host, port); return }
                 if (explicitDisconnect) {
                     _connectionState.value = ConnectionState.ERROR
                     _errorMessage.value = ex.message ?: "Connection failed"
@@ -232,8 +263,12 @@ class RelayClient @Inject constructor() {
             // ECONNREFUSED because Android picks the IPv6 address first.
             setDnsResolver { u -> resolvePreferredAddress(u, port) }
             if (useSsl) {
+                val trustManager = PinningTrustManager(
+                    PinningTrustManager.systemTrustManager(),
+                    pinnedCertSha256
+                ) { rejectedCert = it }
                 val sslContext = SSLContext.getInstance("TLS")
-                sslContext.init(null, null, null)
+                sslContext.init(null, arrayOf(trustManager), null)
                 setSocketFactory(sslContext.socketFactory)
             }
             connect()
@@ -266,6 +301,21 @@ class RelayClient @Inject constructor() {
         val fallback = addresses.firstOrNull() ?: java.net.InetAddress.getByName(host)
         Log.w("RelayClient", "no reachable address for $host:$port; falling back to ${fallback.hostAddress}")
         return fallback
+    }
+
+    /** Stop on a refused certificate and publish it so the user can decide whether to trust it. */
+    private fun rejectCertificate(cert: java.security.cert.X509Certificate, host: String, port: Int) {
+        if (fatalError) return
+        _untrustedCertificate.value = UntrustedCertificate(
+            host = host,
+            port = port,
+            sha256 = PinningTrustManager.fingerprint(cert),
+            subject = cert.subjectX500Principal.name,
+            issuer = cert.issuerX500Principal.name,
+            notAfter = cert.notAfter,
+            replacesPinned = pinnedCertSha256 != null
+        )
+        failFatally("The relay's TLS certificate isn't trusted")
     }
 
     /**

@@ -21,6 +21,9 @@ class ConnectionPrefs @Inject constructor(application: Application) {
     )
 
     fun save(host: String, port: String, password: String, useSsl: Boolean) {
+        // A trusted certificate belongs to one server; pointing the app elsewhere drops it.
+        val serverChanged = prefs.getString(KEY_HOST, "") != host || prefs.getString(KEY_PORT, "") != port
+        if (serverChanged) prefs.edit().remove(KEY_PINNED_CERT).apply()
         prefs.edit()
             .putString(KEY_HOST, host)
             .putString(KEY_PORT, port)
@@ -79,6 +82,13 @@ class ConnectionPrefs @Inject constructor(application: Application) {
             prefs.edit().putBoolean(KEY_LINK_PREVIEWS, value).apply()
         }
 
+    /** SHA-256 fingerprint of a certificate the user accepted for the saved server, if any. */
+    var pinnedCertSha256: String?
+        get() = prefs.getString(KEY_PINNED_CERT, null)
+        set(value) {
+            prefs.edit().putString(KEY_PINNED_CERT, value).apply()
+        }
+
     var hideSpecialBuffers: Boolean
         get() = prefs.getBoolean(KEY_HIDE_SPECIAL, false)
         set(value) {
@@ -94,5 +104,6 @@ class ConnectionPrefs @Inject constructor(application: Application) {
         private const val KEY_AUTO_CONNECT = "should_auto_connect"
         private const val KEY_HIGHLIGHT_WORDS = "highlight_words"
         private const val KEY_LINK_PREVIEWS = "link_previews"
+        private const val KEY_PINNED_CERT = "pinned_cert_sha256"
     }
 }
