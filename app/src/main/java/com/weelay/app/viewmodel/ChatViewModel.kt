@@ -120,6 +120,18 @@ class ChatViewModel @Inject constructor(
     private val _hasMoreHistory = MutableStateFlow(true)
     val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
 
+    /**
+     * Id of the first message that was unread when the buffer was opened, or null if nothing was.
+     * Placed once per opening and then left alone, so new lines arriving while reading don't move
+     * it; the UI draws a "new messages" divider above this message and opens scrolled to it.
+     */
+    private val _readMarkerId = MutableStateFlow<Long?>(null)
+    val readMarkerId: StateFlow<Long?> = _readMarkerId.asStateFlow()
+
+    // Unread count from WeeChat's hotlist, captured before opening the buffer clears it.
+    private var unreadAtOpen = 0
+    private var readMarkerPlaced = false
+
     private val _highlights = MutableStateFlow<List<HighlightItem>>(emptyList())
     val highlights: StateFlow<List<HighlightItem>> = _highlights.asStateFlow()
 
@@ -146,6 +158,8 @@ class ChatViewModel @Inject constructor(
         autoFetchingMore = false
         currentLineCount = 500
         _hasMoreHistory.value = true
+        _readMarkerId.value = null
+        readMarkerPlaced = false
         _bufferTitle.value = ""
 
         val buffer = relayClient.buffers.value.find { it.fullName == bufferFullName }
@@ -237,6 +251,10 @@ class ChatViewModel @Inject constructor(
 
     /** Called when this buffer becomes visible — marks it active so its unread count is cleared. */
     fun onBufferVisible(fullName: String) {
+        // Read the unread count first: making the buffer active marks it read, which clears it.
+        // This runs before loadBuffer's history arrives, so the marker can be placed from it then.
+        val bufferId = relayClient.buffers.value.find { it.fullName == fullName }?.id
+        unreadAtOpen = bufferId?.let { relayClient.hotlist.value[it]?.totalCount } ?: 0
         relayClient.setActiveBuffer(fullName)
     }
 
@@ -365,7 +383,11 @@ class ChatViewModel @Inject constructor(
         // neighbouring group under that group's nick header would misattribute them.
         val groupable = !msg.isAction && last?.messages?.lastOrNull()?.isAction != true
 
-        if (groupable && last != null && msg.nick == last.nick && !showTimeSeparator) {
+        // The first unread message opens a group of its own, so it keeps its nick header under the
+        // "new messages" divider rather than continuing the group above it.
+        val startsUnread = msg.id == _readMarkerId.value
+
+        if (groupable && !startsUnread && last != null && msg.nick == last.nick && !showTimeSeparator) {
             // Extend the current group.
             groups[groups.size - 1] = last.copy(messages = last.messages + msg)
         } else {
@@ -417,12 +439,7 @@ class ChatViewModel @Inject constructor(
 
     /** Recompute all derived state from allLines. Used on history loads and after trimming. */
     private fun rebuildDerivedState(allowAutoFetch: Boolean) {
-        displayMessages.clear()
-        groups.clear()
-        collectedUrls.clear()
-        lastMessageTimestamp = null
-
-        for (line in allLines) appendLine(line)
+        regroup()
 
         if (allowAutoFetch) {
             // If we don't have enough real messages, request more (cap at 5000 to avoid infinite fetching).
@@ -438,7 +455,23 @@ class ChatViewModel @Inject constructor(
             }
         }
 
+        if (_initialLoadComplete.value && !readMarkerPlaced) {
+            readMarkerPlaced = true
+            _readMarkerId.value = readMarkerId(displayMessages, unreadAtOpen)
+            // Once, so the marked message can be split off into its own group.
+            if (_readMarkerId.value != null) regroup()
+        }
+
         publish()
+    }
+
+    private fun regroup() {
+        displayMessages.clear()
+        groups.clear()
+        collectedUrls.clear()
+        lastMessageTimestamp = null
+
+        for (line in allLines) appendLine(line)
     }
 
     /** Push the current derived state to the UI. */
@@ -495,4 +528,23 @@ class ChatViewModel @Inject constructor(
             .reversed()
         _highlights.value = items
     }
+}
+
+/**
+ * Where the "new messages" divider goes: the oldest of the last [unread] messages that weren't
+ * the user's own. Own messages are skipped because WeeChat never puts them in the hotlist, so
+ * they aren't part of the count. If fewer messages are loaded than were unread, the marker goes
+ * on the oldest loaded one, since everything on screen is new.
+ */
+internal fun readMarkerId(messages: List<DisplayMessage>, unread: Int): Long? {
+    if (unread <= 0) return null
+    var counted = 0
+    var oldestUnread: Long? = null
+    for (message in messages.asReversed()) {
+        if (message.isOwnMessage) continue
+        counted++
+        oldestUnread = message.id
+        if (counted == unread) return oldestUnread
+    }
+    return messages.firstOrNull()?.id ?: oldestUnread
 }

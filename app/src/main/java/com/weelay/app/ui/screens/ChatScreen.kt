@@ -127,6 +127,7 @@ fun ChatScreen(
     val initialLoadComplete by viewModel.initialLoadComplete.collectAsState()
     val hasMoreHistory by viewModel.hasMoreHistory.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val readMarkerId by viewModel.readMarkerId.collectAsState()
     val bufferTitle by viewModel.bufferTitle.collectAsState()
     val isChannel by viewModel.isChannel.collectAsState()
     val showLinkPreviews = remember { viewModel.linkPreviews }
@@ -235,50 +236,23 @@ fun ChatScreen(
                 // Wait a frame for Compose to lay out the items
                 delay(50)
 
-                if (targetMessageId != null && !scrolledToTarget) {
-                    // Find and scroll to the target message
-                    var itemIndex = 1
-                    var found = false
-                    for (group in messages) {
-                        if (group.showTimestamp) itemIndex++
-                        for (msg in group.messages) {
-                            if (msg.id == targetMessageId) {
-                                listState.scrollToItem(itemIndex)
-                                highlightedMessageId = targetMessageId
-                                scrolledToTarget = true
-                                found = true
-                                break
-                            }
-                            itemIndex++
-                        }
-                        if (found) break
-                    }
-                    if (!found) {
-                        listState.scrollToItem(lastIndex)
-                    }
-                } else {
-                    listState.scrollToItem(lastIndex)
+                // Where to open: a message jumped to from a highlight wins, then the first unread
+                // message, then the bottom.
+                val targetIndex = targetMessageId?.let { itemIndexOf(messages, it) }
+                if (targetIndex != null && !scrolledToTarget) {
+                    highlightedMessageId = targetMessageId
+                    scrolledToTarget = true
                 }
+                val openIndex = targetIndex
+                    ?: readMarkerId?.let { itemIndexOf(messages, it) }
+                    ?: lastIndex
+                listState.scrollToItem(openIndex)
                 if (!contentReady) {
                     initialLoadTime = System.currentTimeMillis()
                     contentReady = true
                     delay(300)
                     // Re-scroll after settle (link previews etc. may have shifted layout)
-                    if (targetMessageId != null && scrolledToTarget) {
-                        var itemIndex = 1
-                        for (group in messages) {
-                            if (group.showTimestamp) itemIndex++
-                            for (msg in group.messages) {
-                                if (msg.id == targetMessageId) {
-                                    listState.scrollToItem(itemIndex)
-                                    break
-                                }
-                                itemIndex++
-                            }
-                        }
-                    } else {
-                        listState.scrollToItem(lastIndex)
-                    }
+                    listState.scrollToItem(openIndex)
                     showContent = true
                 }
             } else if (loadedMoreHistory && oldestMessageId != null) {
@@ -750,37 +724,42 @@ fun ChatScreen(
                             items = group.messages,
                             key = { it.id }
                         ) { message ->
-                            SwipeableMessage(
-                                onSwipeRight = {
-                                    replyToNick = group.nick
-                                    replyToMessage = message.text
-                                    replyToColor = group.nickColor
-                                },
-                                onSwipeLeft = {
-                                    selectedNick = group.nick
-                                }
-                            ) {
-                                MessageBubble(
-                                    message = message,
-                                    isFirstInGroup = message == group.messages.first(),
-                                    isLastInGroup = message == group.messages.last(),
-                                    isOwnMessage = group.isOwnMessage,
-                                    onNickClick = { nick ->
-                                    val text = inputText.text
-                                    val suffix = if (text.isEmpty()) "$nick: " else "$nick "
-                                    val newText = text + suffix
-                                    inputText = TextFieldValue(newText, TextRange(newText.length))
-                                },
-                                    nick = group.nick,
-                                    nickColorValue = group.nickColor,
-                                    searchQuery = if (showSearch && searchQuery.length >= 2) searchQuery else null,
-                                    isHighlighted = message.id == highlightedMessageId,
-                                    showLinkPreview = showLinkPreviews,
-                                    onLongPress = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        messageMenuFor = group to message
+                            // Drawn inside the message's own item rather than as a list item of its
+                            // own, so the item indices that search and jumps compute stay valid.
+                            Column {
+                                if (message.id == readMarkerId) NewMessagesDivider()
+                                SwipeableMessage(
+                                    onSwipeRight = {
+                                        replyToNick = group.nick
+                                        replyToMessage = message.text
+                                        replyToColor = group.nickColor
+                                    },
+                                    onSwipeLeft = {
+                                        selectedNick = group.nick
                                     }
-                                )
+                                ) {
+                                    MessageBubble(
+                                        message = message,
+                                        isFirstInGroup = message == group.messages.first(),
+                                        isLastInGroup = message == group.messages.last(),
+                                        isOwnMessage = group.isOwnMessage,
+                                        onNickClick = { nick ->
+                                        val text = inputText.text
+                                        val suffix = if (text.isEmpty()) "$nick: " else "$nick "
+                                        val newText = text + suffix
+                                        inputText = TextFieldValue(newText, TextRange(newText.length))
+                                    },
+                                        nick = group.nick,
+                                        nickColorValue = group.nickColor,
+                                        searchQuery = if (showSearch && searchQuery.length >= 2) searchQuery else null,
+                                        isHighlighted = message.id == highlightedMessageId,
+                                        showLinkPreview = showLinkPreviews,
+                                        onLongPress = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            messageMenuFor = group to message
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -1043,6 +1022,41 @@ private fun MessageActionRow(
         Icon(icon, contentDescription = null, tint = Color(0xFFE9EDEF), modifier = Modifier.size(24.dp))
         Spacer(modifier = Modifier.width(16.dp))
         Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Color(0xFFE9EDEF))
+    }
+}
+
+/**
+ * LazyColumn index of the message with [id]: one item for the "load earlier" row, then per group
+ * an optional timestamp separator followed by one item per message. Null if it isn't loaded.
+ */
+private fun itemIndexOf(groups: List<MessageGroup>, id: Long): Int? {
+    var index = 1
+    for (group in groups) {
+        if (group.showTimestamp) index++
+        for (msg in group.messages) {
+            if (msg.id == id) return index
+            index++
+        }
+    }
+    return null
+}
+
+@Composable
+private fun NewMessagesDivider() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF00A884))
+        Text(
+            text = "New messages",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = Color(0xFF00A884),
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF00A884))
     }
 }
 
