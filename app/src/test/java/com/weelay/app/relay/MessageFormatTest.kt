@@ -240,4 +240,24 @@ class MessageFormatTest {
         tags = tags,
         displayed = displayed,
     )
+
+    @Test
+    fun isChannel_prefersBufferTypeOverNameShape() {
+        // "&" channels have no "#" but WeeChat marks them as channels.
+        val ampChannel = RelayBuffer(name = "irc.oftc.&ops", localVariables = mapOf("type" to "channel"))
+        assertTrue(MessageFormat.isChannel(ampChannel))
+
+        // A query buffer for a nick containing "#" is still a query.
+        val query = RelayBuffer(name = "irc.libera.we#rd", localVariables = mapOf("type" to "private"))
+        assertFalse(MessageFormat.isChannel(query))
+
+        // The server buffer's name contains no channel, but the old contains("#") test only
+        // got this right by accident; type settles it.
+        val server = RelayBuffer(name = "irc.server.libera", localVariables = mapOf("type" to "server"))
+        assertFalse(MessageFormat.isChannel(server))
+
+        // Without a type, fall back to the channel name's leading "#".
+        assertTrue(MessageFormat.isChannel(RelayBuffer(name = "irc.libera.#weechat")))
+        assertFalse(MessageFormat.isChannel(RelayBuffer(name = "irc.libera.someone")))
+    }
 }

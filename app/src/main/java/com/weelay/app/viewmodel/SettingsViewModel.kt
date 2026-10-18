@@ -18,7 +18,8 @@ data class SettingsUiState(
     val password: String = "",
     val useSsl: Boolean = false,
     val hideSpecialBuffers: Boolean = false,
-    val highlightWords: String = ""
+    val highlightWords: String = "",
+    val linkPreviews: Boolean = true
 )
 
 @HiltViewModel
@@ -39,7 +40,8 @@ class SettingsViewModel @Inject constructor(
             password = saved.password,
             useSsl = saved.useSsl,
             hideSpecialBuffers = connectionPrefs.hideSpecialBuffers,
-            highlightWords = connectionPrefs.highlightWords
+            highlightWords = connectionPrefs.highlightWords,
+            linkPreviews = connectionPrefs.linkPreviews
         )
     }
 
@@ -77,6 +79,24 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(highlightWords = words) }
         // Persisted immediately; ChatViewModel rebuilds its matchers on the next buffer load.
         connectionPrefs.highlightWords = words
+    }
+
+    fun onLinkPreviewsChange(enabled: Boolean) {
+        _uiState.update { it.copy(linkPreviews = enabled) }
+        connectionPrefs.linkPreviews = enabled
+    }
+
+    /**
+     * Drop the relay connection and stop the foreground service.
+     *
+     * Both steps happen here synchronously, not only in the service: the connect screen shown next
+     * reads auto-connect and the connection state straight away, and seeing either still set
+     * before the service had processed the stop would send it right back online.
+     */
+    fun disconnect() {
+        connectionPrefs.shouldAutoConnect = false
+        relayClient.disconnect()
+        RelayService.stop(application)
     }
 
     fun saveAndReconnect() {

@@ -117,8 +117,7 @@ class BufferListViewModel @Inject constructor(
             .map { buf ->
                 val lastLine = latestLinePerBuffer[buf.id]?.takeIf { isRegularMessage(it) }
                     ?: buf.lines.lastOrNull { isRegularMessage(it) }
-                val isChannel = buf.fullName.contains("#") ||
-                        buf.localVariables["type"] == "channel"
+                val isChannel = MessageFormat.isChannel(buf)
 
                 val hot = hotlist[buf.id]
 

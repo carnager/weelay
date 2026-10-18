@@ -287,7 +287,7 @@ class RelayService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Weelay")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setSilent(true)
@@ -314,7 +314,7 @@ class RelayService : Service() {
 
         val text = message ?: "The relay connection failed and will not be retried."
         val notification = NotificationCompat.Builder(this, MESSAGE_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Weelay disconnected")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -424,7 +424,7 @@ class RelayService : Service() {
         history.forEach { style.addMessage(it) }
 
         val notification = NotificationCompat.Builder(this, MESSAGE_CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_notification)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(openBufferIntent(bufferName, notifId))
@@ -443,7 +443,7 @@ class RelayService : Service() {
         // posting it for a single conversation just adds a redundant row on some launchers.
         if (conversations.size > 1) {
             val summary = NotificationCompat.Builder(this, MESSAGE_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle("Weelay")
                 .setContentText("New messages in ${conversations.size} buffers")
                 .setGroup(MESSAGE_GROUP_KEY)

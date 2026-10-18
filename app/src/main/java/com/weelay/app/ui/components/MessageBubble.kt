@@ -12,18 +12,24 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -48,7 +54,9 @@ fun MessageBubble(
     nick: String,
     nickColorValue: Color,
     searchQuery: String? = null,
-    isHighlighted: Boolean = false
+    isHighlighted: Boolean = false,
+    showLinkPreview: Boolean = true,
+    onLongPress: (() -> Unit)? = null
 ) {
     val largeRadius = 18.dp
     val smallRadius = 3.dp
@@ -200,20 +208,37 @@ fun MessageBubble(
                     verticalAlignment = Alignment.Bottom,
                     modifier = Modifier.width(IntrinsicSize.Max)
                 ) {
-                    ClickableText(
+                    // A plain Text with its own tap handling rather than ClickableText, which
+                    // can't report a long press.
+                    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+                    // The caller passes a fresh lambda on every recomposition; read it through
+                    // state so that doesn't restart the gesture detector each time.
+                    val currentOnLongPress by rememberUpdatedState(onLongPress)
+                    Text(
                         text = annotatedText,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 16.sp,
                             lineHeight = 22.sp,
                             color = textColor
                         ),
-                        modifier = Modifier.weight(1f, fill = false),
-                        onClick = { offset ->
-                            annotatedText.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                                .firstOrNull()?.let { annotation ->
-                                    uriHandler.openUri(annotation.item)
-                                }
-                        }
+                        onTextLayout = { textLayout = it },
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .pointerInput(annotatedText, onLongPress != null) {
+                                detectTapGestures(
+                                    onTap = { position ->
+                                        val offset = textLayout?.getOffsetForPosition(position)
+                                            ?: return@detectTapGestures
+                                        annotatedText
+                                            .getStringAnnotations(tag = "URL", start = offset, end = offset)
+                                            .firstOrNull()
+                                            ?.let { uriHandler.openUri(it.item) }
+                                    },
+                                    onLongPress = if (onLongPress != null) {
+                                        { currentOnLongPress?.invoke() }
+                                    } else null
+                                )
+                            }
                     )
 
                     Spacer(modifier = Modifier.width(6.dp))
@@ -233,7 +258,7 @@ fun MessageBubble(
                 val firstUrl = remember(message.text) {
                     urlPattern.find(message.text)?.value
                 }
-                firstUrl?.let { url ->
+                if (showLinkPreview) firstUrl?.let { url ->
                     LinkPreviewCard(url = url, isOwnMessage = isOwnMessage)
                 }
             }

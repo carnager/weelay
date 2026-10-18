@@ -64,6 +64,16 @@ class ChatViewModel @Inject constructor(
     private val _bufferName = MutableStateFlow("")
     val bufferName: StateFlow<String> = _bufferName.asStateFlow()
 
+    /** The buffer's title — the channel topic, for IRC channels. Empty when there is none. */
+    private val _bufferTitle = MutableStateFlow("")
+    val bufferTitle: StateFlow<String> = _bufferTitle.asStateFlow()
+
+    private val _isChannel = MutableStateFlow(false)
+    val isChannel: StateFlow<Boolean> = _isChannel.asStateFlow()
+
+    /** Read once per screen; flipping the setting takes effect the next time a buffer opens. */
+    val linkPreviews: Boolean get() = connectionPrefs.linkPreviews
+
     private val _nicklist = MutableStateFlow<List<RelayNicklistEntry>>(emptyList())
     val nicklist: StateFlow<List<RelayNicklistEntry>> = _nicklist.asStateFlow()
 
@@ -136,6 +146,7 @@ class ChatViewModel @Inject constructor(
         autoFetchingMore = false
         currentLineCount = 500
         _hasMoreHistory.value = true
+        _bufferTitle.value = ""
 
         val buffer = relayClient.buffers.value.find { it.fullName == bufferFullName }
         if (buffer != null) {
@@ -145,6 +156,17 @@ class ChatViewModel @Inject constructor(
             mentionPatternsCache = null
         } else {
             _bufferName.value = bufferFullName.substringAfterLast(".")
+            _isChannel.value = bufferFullName.substringAfterLast('.').startsWith('#')
+        }
+
+        // Track the buffer's metadata as it changes: topic changes arrive as buffer updates, and a
+        // buffer opened from a deep link may not be in the list yet when the screen first loads.
+        bufferJobs += viewModelScope.launch {
+            relayClient.buffers.collect { buffers ->
+                val buf = buffers.find { it.fullName == currentBufferFullName } ?: return@collect
+                _bufferTitle.value = MessageFormat.stripIrcFormatting(buf.title).trim()
+                _isChannel.value = MessageFormat.isChannel(buf)
+            }
         }
 
         // Watch for incoming lines (history + real-time). The history request is issued from

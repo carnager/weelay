@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -54,6 +56,7 @@ import com.weelay.app.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onDisconnected: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -213,33 +216,20 @@ fun SettingsScreen(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "Hide special buffers",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFFE9EDEF)
-                    )
-                    Text(
-                        "Hide server and special buffers from the buffer list",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF8696A0)
-                    )
-                }
-                Switch(
-                    checked = uiState.hideSpecialBuffers,
-                    onCheckedChange = viewModel::onHideSpecialBuffersChange,
-                    colors = SwitchDefaults.colors(
-                        checkedTrackColor = Color(0xFF00A884),
-                        checkedThumbColor = Color.White
-                    )
-                )
-            }
+            SettingsSwitchRow(
+                title = "Hide special buffers",
+                summary = "Hide server and special buffers from the buffer list",
+                checked = uiState.hideSpecialBuffers,
+                onCheckedChange = viewModel::onHideSpecialBuffersChange
+            )
+
+            SettingsSwitchRow(
+                title = "Link previews",
+                summary = "Show a preview card for links in chat. Fetching a preview reveals " +
+                    "your IP address to the site the link points to.",
+                checked = uiState.linkPreviews,
+                onCheckedChange = viewModel::onLinkPreviewsChange
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -260,6 +250,68 @@ fun SettingsScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+
+            HorizontalDivider(color = Color(0xFF233039))
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedButton(
+                onClick = {
+                    viewModel.disconnect()
+                    onDisconnected()
+                },
+                modifier = Modifier.fillMaxWidth(),
+                border = BorderStroke(1.dp, Color(0xFFE57373)),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373))
+            ) {
+                Text("Disconnect")
+            }
+
+            Text(
+                "Closes the relay connection and stops the background service. " +
+                    "Weelay won't reconnect until you connect again.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF8696A0),
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    summary: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = Color(0xFFE9EDEF)
+            )
+            Text(
+                summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF8696A0)
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedTrackColor = Color(0xFF00A884),
+                checkedThumbColor = Color.White
+            )
+        )
     }
 }

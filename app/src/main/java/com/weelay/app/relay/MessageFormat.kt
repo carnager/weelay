@@ -98,6 +98,18 @@ object MessageFormat {
         return text.trimStart().substringBefore(' ').trim()
     }
 
+    /**
+     * True if [buffer] is a channel. WeeChat's `type` local variable says so directly; the "#"
+     * test is only the fallback for buffers that don't set it, and on its own it misreads "&"
+     * channels as queries.
+     */
+    fun isChannel(buffer: RelayBuffer): Boolean =
+        when (buffer.localVariables["type"]) {
+            "channel" -> true
+            null, "" -> buffer.fullName.substringAfterLast('.').startsWith('#')
+            else -> false
+        }
+
     /** True if [prefix] looks like a nick rather than one of WeeChat's system-line markers. */
     private fun looksLikeChatPrefix(prefix: String): Boolean {
         val trimmed = prefix.trim()

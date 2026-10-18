@@ -44,7 +44,13 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -99,6 +105,7 @@ import com.weelay.app.ui.components.MessageBubble
 import com.weelay.app.ui.components.NickActionSheet
 import com.weelay.app.ui.theme.nickColor
 import com.weelay.app.viewmodel.ChatViewModel
+import com.weelay.app.viewmodel.DisplayMessage
 import com.weelay.app.viewmodel.MessageGroup
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -120,6 +127,13 @@ fun ChatScreen(
     val initialLoadComplete by viewModel.initialLoadComplete.collectAsState()
     val hasMoreHistory by viewModel.hasMoreHistory.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val bufferTitle by viewModel.bufferTitle.collectAsState()
+    val isChannel by viewModel.isChannel.collectAsState()
+    val showLinkPreviews = remember { viewModel.linkPreviews }
+    var showTopic by remember { mutableStateOf(false) }
+    var messageMenuFor by remember { mutableStateOf<Pair<MessageGroup, DisplayMessage>?>(null) }
+    // A kick or ban waiting for confirmation: the command to send, and a description of it.
+    var pendingModAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
     val listState = rememberLazyListState()
     var selectedNick by remember { mutableStateOf<String?>(null) }
@@ -137,13 +151,13 @@ fun ChatScreen(
     val inputFieldFocusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
     var replyToNick by remember { mutableStateOf<String?>(null) }
     var replyToMessage by remember { mutableStateOf<String?>(null) }
     var replyToColor by remember { mutableStateOf(Color(0xFF00A884)) }
     var justSentMessage by remember { mutableStateOf(false) }
     var oldestMessageId by remember { mutableStateOf<Long?>(null) }
-
-    val isChannel = bufferFullName.contains("#")
 
     val showScrollToBottom by remember {
         derivedStateOf {
@@ -316,15 +330,69 @@ fun ChatScreen(
                 val targetBuffer = viewModel.nickservInfo(nick)
                 onNavigateToBuffer(targetBuffer)
             },
+            // Kick and ban are a swipe and a tap away and can't be undone from here, so they ask
+            // first. Quiet is milder and stays one tap.
             onBan = {
-                viewModel.sendMessage("/ban $nick")
+                pendingModAction = "/ban $nick" to "Ban $nick from $bufferName?"
             },
             onKick = {
-                viewModel.sendMessage("/kick $nick")
+                pendingModAction = "/kick $nick" to "Kick $nick from $bufferName?"
             },
             onQuiet = {
                 viewModel.sendMessage("/quiet $nick")
             }
+        )
+    }
+
+    pendingModAction?.let { (command, question) ->
+        AlertDialog(
+            onDismissRequest = { pendingModAction = null },
+            text = { Text(question) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.sendMessage(command)
+                    pendingModAction = null
+                }) { Text(if (command.startsWith("/ban")) "Ban" else "Kick", color = Color(0xFFE57373)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingModAction = null }) { Text("Cancel") }
+            },
+            containerColor = Color(0xFF1F2C34)
+        )
+    }
+
+    if (showTopic && bufferTitle.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showTopic = false },
+            title = { Text(bufferName) },
+            text = {
+                SelectionContainer {
+                    Text(bufferTitle, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTopic = false }) { Text("Close") }
+            },
+            containerColor = Color(0xFF1F2C34)
+        )
+    }
+
+    messageMenuFor?.let { (group, message) ->
+        MessageActionSheet(
+            onDismiss = { messageMenuFor = null },
+            onCopy = {
+                clipboard.setText(AnnotatedString(message.text))
+                // Android 13+ shows its own confirmation when something is copied.
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onReply = {
+                replyToNick = group.nick
+                replyToMessage = message.text
+                replyToColor = group.nickColor
+            },
+            onNickActions = if (group.isOwnMessage) null else ({ selectedNick = group.nick })
         )
     }
 
@@ -511,12 +579,29 @@ fun ChatScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = bufferName,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 18.sp
+                        Column(
+                            modifier = if (bufferTitle.isNotEmpty()) {
+                                Modifier.clickable { showTopic = true }
+                            } else Modifier
+                        ) {
+                            Text(
+                                text = bufferName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 18.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                        )
+                            if (bufferTitle.isNotEmpty()) {
+                                Text(
+                                    text = bufferTitle,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = Color(0xFF8696A0),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -588,7 +673,8 @@ fun ChatScreen(
                     else -> ""
                 }
                 val bannerColor = when (connectionState) {
-                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Color(0xFF1B5E20)
+                    // Amber: in progress, not yet a failure — green read as "all good".
+                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Color(0xFF8D6E00)
                     else -> Color(0xFFB71C1C)
                 }
                 Box(
@@ -688,7 +774,12 @@ fun ChatScreen(
                                     nick = group.nick,
                                     nickColorValue = group.nickColor,
                                     searchQuery = if (showSearch && searchQuery.length >= 2) searchQuery else null,
-                                    isHighlighted = message.id == highlightedMessageId
+                                    isHighlighted = message.id == highlightedMessageId,
+                                    showLinkPreview = showLinkPreviews,
+                                    onLongPress = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        messageMenuFor = group to message
+                                    }
                                 )
                             }
                         }
@@ -909,6 +1000,49 @@ fun ChatScreen(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageActionSheet(
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    onReply: () -> Unit,
+    onNickActions: (() -> Unit)?
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        containerColor = Color(0xFF1F2C34),
+        dragHandle = null
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            MessageActionRow(Icons.Default.ContentCopy, "Copy text") { onCopy(); onDismiss() }
+            MessageActionRow(Icons.AutoMirrored.Filled.Reply, "Reply") { onReply(); onDismiss() }
+            onNickActions?.let { action ->
+                MessageActionRow(Icons.Default.Person, "Nick actions") { onDismiss(); action() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = Color(0xFFE9EDEF), modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Color(0xFFE9EDEF))
     }
 }
 

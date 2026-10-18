@@ -129,7 +129,7 @@ fun BufferListScreen(
                 }
                 val bannerColor = when (connectionState) {
                     com.weelay.app.relay.ConnectionState.RECONNECTING,
-                    com.weelay.app.relay.ConnectionState.CONNECTING -> Color(0xFF1B5E20)
+                    com.weelay.app.relay.ConnectionState.CONNECTING -> Color(0xFF8D6E00)
                     else -> Color(0xFFB71C1C)
                 }
                 Box(

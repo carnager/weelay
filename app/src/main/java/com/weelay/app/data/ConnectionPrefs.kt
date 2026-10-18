@@ -69,6 +69,16 @@ class ConnectionPrefs @Inject constructor(application: Application) {
             prefs.edit().putString(KEY_HIGHLIGHT_WORDS, value).apply()
         }
 
+    /**
+     * Fetch OpenGraph previews for links in chat. Fetching a link reveals the device's IP address
+     * to whoever controls it, and anyone in a channel can post one, so this can be switched off.
+     */
+    var linkPreviews: Boolean
+        get() = prefs.getBoolean(KEY_LINK_PREVIEWS, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_LINK_PREVIEWS, value).apply()
+        }
+
     var hideSpecialBuffers: Boolean
         get() = prefs.getBoolean(KEY_HIDE_SPECIAL, false)
         set(value) {
@@ -83,5 +93,6 @@ class ConnectionPrefs @Inject constructor(application: Application) {
         private const val KEY_HIDE_SPECIAL = "hide_special_buffers"
         private const val KEY_AUTO_CONNECT = "should_auto_connect"
         private const val KEY_HIGHLIGHT_WORDS = "highlight_words"
+        private const val KEY_LINK_PREVIEWS = "link_previews"
     }
 }
