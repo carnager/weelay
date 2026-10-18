@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
@@ -54,6 +55,9 @@ import com.weelay.app.viewmodel.BufferListViewModel
 @Composable
 fun BufferListScreen(
     onBufferClick: (String) -> Unit,
+    /** Text shared from another app; while set, tapping a buffer sends it there as a draft. */
+    shareText: String? = null,
+    onCancelShare: () -> Unit = {},
     onHighlightClick: (bufferFullName: String, messageId: Long) -> Unit = { b, _ -> onBufferClick(b) },
     onSettingsClick: () -> Unit = {},
     viewModel: BufferListViewModel = hiltViewModel()
@@ -145,6 +149,38 @@ fun BufferListScreen(
                         color = Color.White,
                         modifier = Modifier.padding(vertical = 4.dp, horizontal = 12.dp)
                     )
+                }
+            }
+
+            if (shareText != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1F2C34))
+                        .padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Share to…",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF00A884)
+                        )
+                        Text(
+                            shareText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF8696A0),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    IconButton(onClick = onCancelShare) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel sharing",
+                            tint = Color(0xFF8696A0)
+                        )
+                    }
                 }
             }
 

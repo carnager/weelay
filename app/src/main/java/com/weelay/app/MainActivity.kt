@@ -58,6 +58,17 @@ class MainActivity : ComponentActivity() {
     private val pendingBuffer = mutableStateOf<String?>(null)
     private val deepLinkTrigger = mutableStateOf(0)
 
+    // Text shared from another app, waiting for the user to pick a buffer for it.
+    private val pendingShare = mutableStateOf<String?>(null)
+    // Shared text on its way into the chosen buffer's input, consumed by that ChatScreen.
+    private val pendingDraft = mutableStateOf<String?>(null)
+
+    private fun handleShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        if (!text.isNullOrEmpty()) pendingShare.value = text
+    }
+
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             Log.i("Weelay", "POST_NOTIFICATIONS granted=$granted")
@@ -93,6 +104,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleShare(intent)
         Log.w("Weelay", "onNewIntent: action=${intent.action} data=${intent.data}")
         handleDeepLink(intent.data)
     }
@@ -107,6 +119,9 @@ class MainActivity : ComponentActivity() {
         )
         ensureNotificationPermission()
         handleDeepLink(intent.data)
+        // Only on a fresh start: after a configuration change the intent is redelivered here and
+        // would offer an already-handled share again.
+        if (savedInstanceState == null) handleShare(intent)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -140,6 +155,17 @@ class MainActivity : ComponentActivity() {
 
                     val navController = rememberNavController()
                     val trigger = deepLinkTrigger.value
+
+                    // A share arriving while a chat is open: go back to the buffer list to pick
+                    // where it goes. (Before connecting, the list shows it once it's reached.)
+                    val share = pendingShare.value
+                    LaunchedEffect(share) {
+                        if (share == null) return@LaunchedEffect
+                        val route = navController.currentDestination?.route
+                        if (route != null && route != "connect" && route != "buffers") {
+                            navController.popBackStack("buffers", inclusive = false)
+                        }
+                    }
 
                     // Handle deep link when app is already past connect screen
                     LaunchedEffect(trigger) {
@@ -203,7 +229,13 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("buffers") {
                             BufferListScreen(
+                                shareText = pendingShare.value,
+                                onCancelShare = { pendingShare.value = null },
                                 onBufferClick = { bufferFullName ->
+                                    pendingShare.value?.let {
+                                        pendingDraft.value = it
+                                        pendingShare.value = null
+                                    }
                                     val encoded = URLEncoder.encode(bufferFullName, "UTF-8")
                                     navController.navigate("chat/$encoded")
                                 },
@@ -243,6 +275,8 @@ class MainActivity : ComponentActivity() {
                             ChatScreen(
                                 bufferFullName = bufferFullName,
                                 targetMessageId = if (targetMessageId != -1L) targetMessageId else null,
+                                initialDraft = pendingDraft.value,
+                                onDraftConsumed = { pendingDraft.value = null },
                                 onBack = { navController.popBackStack() },
                                 onNavigateToBuffer = { targetBuffer ->
                                     val encoded = URLEncoder.encode(targetBuffer, "UTF-8")

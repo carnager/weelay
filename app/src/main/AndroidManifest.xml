@@ -31,6 +31,12 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="weelay" />
             </intent-filter>
+            <!-- Share text or a link from another app into a buffer's input. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <service

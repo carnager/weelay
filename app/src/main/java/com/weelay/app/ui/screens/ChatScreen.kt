@@ -125,6 +125,9 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     bufferFullName: String,
     targetMessageId: Long? = null,
+    /** Text shared from another app, put into the input for the user to edit and send. */
+    initialDraft: String? = null,
+    onDraftConsumed: () -> Unit = {},
     onBack: () -> Unit,
     onNavigateToBuffer: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
@@ -221,6 +224,14 @@ fun ChatScreen(
             if (totalItems > 0) {
                 listState.scrollToItem(totalItems - 1)
             }
+        }
+    }
+
+    LaunchedEffect(initialDraft) {
+        if (initialDraft != null) {
+            inputText = TextFieldValue(initialDraft, TextRange(initialDraft.length))
+            onDraftConsumed()
+            inputFieldFocusRequester.requestFocus()
         }
     }
 
