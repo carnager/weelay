@@ -33,6 +33,9 @@ object Palette {
     /** Search matches and the outline on a message jumped to from the highlights sheet. */
     val searchMatch = Color(0xFFFFD54F)
 
+    /** Connected-state dot. */
+    val ok = Color(0xFF7FD1B9)
+
     val bannerProgress = Color(0xFF6B4F12)
     val bannerError = Color(0xFF8C2F2F)
 }

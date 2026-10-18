@@ -4,6 +4,12 @@ import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
+import com.weelay.app.relay.ConnectionState
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material3.AlertDialog
@@ -71,6 +77,7 @@ fun BufferListScreen(
     viewModel: BufferListViewModel = hiltViewModel()
 ) {
     val buffers by viewModel.buffers.collectAsState()
+    val host = remember { viewModel.host }
     val connectionState by viewModel.connectionState.collectAsState()
     val highlights by viewModel.highlights.collectAsState()
     var showHighlights by remember { mutableStateOf(false) }
@@ -146,14 +153,42 @@ fun BufferListScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        "Weelay",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = Palette.onSurface
-                    )
+                    val (status, dot) = when (connectionState) {
+                        ConnectionState.CONNECTED -> "connected" to Palette.ok
+                        ConnectionState.CONNECTING -> "connecting…" to Palette.accent
+                        ConnectionState.RECONNECTING -> "reconnecting…" to Palette.accent
+                        ConnectionState.DISCONNECTED -> "disconnected" to Palette.danger
+                        ConnectionState.ERROR -> "connection lost" to Palette.danger
+                    }
+                    Column {
+                        Text(
+                            "weelay",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace
+                            ),
+                            color = Palette.onSurface
+                        )
+                        // The connection state lives here rather than in a banner: it's always
+                        // visible without pushing the list down when it changes.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .background(dot, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "$host · $status",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace
+                                ),
+                                color = Palette.muted
+                            )
+                        }
+                    }
                 },
                 actions = {
                     IconButton(onClick = {
@@ -186,36 +221,6 @@ fun BufferListScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Connection status banner
-            if (connectionState != com.weelay.app.relay.ConnectionState.CONNECTED) {
-                val bannerText = when (connectionState) {
-                    com.weelay.app.relay.ConnectionState.RECONNECTING -> "Reconnecting..."
-                    com.weelay.app.relay.ConnectionState.CONNECTING -> "Connecting..."
-                    com.weelay.app.relay.ConnectionState.DISCONNECTED -> "Disconnected"
-                    com.weelay.app.relay.ConnectionState.ERROR -> "Connection lost"
-                    else -> ""
-                }
-                val bannerColor = when (connectionState) {
-                    com.weelay.app.relay.ConnectionState.RECONNECTING,
-                    com.weelay.app.relay.ConnectionState.CONNECTING -> Palette.bannerProgress
-                    else -> Palette.bannerError
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(bannerColor)
-                        .padding(vertical = 2.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = bannerText,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(vertical = 4.dp, horizontal = 12.dp)
-                    )
-                }
-            }
-
             if (shareText != null) {
                 Row(
                     modifier = Modifier
@@ -260,24 +265,93 @@ fun BufferListScreen(
                     )
                 }
             } else {
+                val active = remember(buffers) { buffers.filter { it.unreadCount > 0 } }
+                // Sections in buffer order: each network's channels (and server buffer), then its
+                // private chats.
+                val sections = remember(buffers) {
+                    buffers.groupBy { it.network }.flatMap { (network, list) ->
+                        val (private, rest) = list.partition { it.isPrivate }
+                        listOfNotNull(
+                            rest.takeIf { it.isNotEmpty() }?.let { network to it },
+                            private.takeIf { it.isNotEmpty() }?.let { "$network · private" to it }
+                        )
+                    }
+                }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(buffers, key = { it.fullName }) { buffer ->
-                        BufferListItem(
-                            buffer = buffer,
-                            onClick = { onBufferClick(buffer.fullName) },
-                            onLongClick = { actionsFor = buffer }
-                        )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 76.dp),
-                            color = Palette.divider
-                        )
+                    if (active.isNotEmpty()) {
+                        item(key = "act") {
+                            ActivityStrip(active, onClick = { onBufferClick(it.fullName) })
+                        }
+                    }
+                    sections.forEach { (title, list) ->
+                        item(key = "section_$title") {
+                            Text(
+                                title.uppercase(),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 0.8.sp
+                                ),
+                                color = Palette.muted,
+                                modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 2.dp)
+                            )
+                        }
+                        items(list, key = { it.fullName }) { buffer ->
+                            BufferListItem(
+                                buffer = buffer,
+                                onClick = { onBufferClick(buffer.fullName) },
+                                onLongClick = { actionsFor = buffer }
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+/**
+ * WeeChat's hotlist as a strip: every buffer with unread messages, highlights in the accent.
+ * Tapping one opens it.
+ */
+@Composable
+private fun ActivityStrip(active: List<BufferDisplayItem>, onClick: (BufferDisplayItem) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "act",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+            color = Palette.muted
+        )
+        active.forEach { buffer ->
+            val highlight = buffer.highlightCount > 0
+            Text(
+                "${buffer.number}:${buffer.displayName.removePrefix("#")}",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal
+                ),
+                color = if (highlight) Palette.onAccent else Palette.onSurface,
+                modifier = Modifier
+                    .background(
+                        if (highlight) Palette.accent else Palette.surfaceRaised,
+                        RoundedCornerShape(4.dp)
+                    )
+                    .clickable { onClick(buffer) }
+                    .padding(horizontal = 6.dp, vertical = 3.dp)
+            )
+        }
+    }
+    HorizontalDivider(color = Palette.divider)
 }
 
 @Composable
@@ -307,118 +381,77 @@ private fun BufferListItem(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
-    val avatarColor = if (buffer.isChannel) {
-        Palette.accent
-    } else {
-        nickColor(buffer.displayName)
-    }
-
-    val initial = if (buffer.isChannel) "#" else {
-        buffer.displayName.firstOrNull()?.uppercase() ?: "?"
-    }
-
+    val unread = buffer.unreadCount > 0
+    val mono = FontFamily.Monospace
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            shape = CircleShape,
-            color = avatarColor,
-            modifier = Modifier.size(50.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                if (buffer.isChannel) {
-                    Icon(
-                        imageVector = Icons.Default.Tag,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                } else {
-                    Text(
-                        text = initial,
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = Color.White
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.width(14.dp))
-
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.Center
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = buffer.displayName,
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        fontSize = 17.sp,
-                        fontWeight = if (buffer.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
-                    ),
-                    color = Palette.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
-                if (buffer.lastMessageTime.isNotEmpty()) {
-                    Text(
-                        text = buffer.lastMessageTime,
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 12.sp
-                        ),
-                        color = if (buffer.unreadCount > 0)
-                            Palette.accent
-                        else Palette.muted
-                    )
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+        // WeeChat's buffer number, so the list lines up with the desktop client and /buffer N.
+        Text(
+            text = buffer.number.toString(),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = mono),
+            color = Palette.muted,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(22.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = buffer.displayName,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    fontSize = 15.sp,
+                    fontFamily = mono,
+                    fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal
+                ),
+                color = when {
+                    buffer.isPrivate -> nickColor(buffer.displayName)
+                    unread -> Palette.onSurface
+                    else -> Palette.onSurface.copy(alpha = 0.78f)
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (buffer.lastMessage.isNotEmpty()) {
                 Text(
                     text = buffer.lastMessage,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 14.sp
-                    ),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
                     color = Palette.muted,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
+                    overflow = TextOverflow.Ellipsis
                 )
-                if (buffer.unreadCount > 0) {
-                    // Highlights get their own colour so a buffer that mentioned you stands out
-                    // from one that merely has unread chatter.
-                    Badge(
-                        containerColor = if (buffer.highlightCount > 0) {
-                            Color(0xFFE53935)
-                        } else {
-                            Palette.accent
-                        }
-                    ) {
-                        Text(
-                            text = if (buffer.unreadCount > 99) "99+" else buffer.unreadCount.toString(),
-                            color = Color.White,
-                            fontSize = 11.sp
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = buffer.lastMessageTime,
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontFamily = mono),
+                color = Palette.muted
+            )
+            if (unread) {
+                // Highlights in the accent so a buffer that mentioned you stands out from one
+                // that merely has unread chatter.
+                val highlight = buffer.highlightCount > 0
+                Text(
+                    text = if (buffer.unreadCount > 99) "99+" else buffer.unreadCount.toString(),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontFamily = mono,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = if (highlight) Palette.onAccent else Palette.onSurface,
+                    modifier = Modifier
+                        .padding(top = 3.dp)
+                        .background(
+                            if (highlight) Palette.accent else Palette.surfaceRaised,
+                            RoundedCornerShape(4.dp)
                         )
-                    }
-                }
+                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                )
             }
         }
     }

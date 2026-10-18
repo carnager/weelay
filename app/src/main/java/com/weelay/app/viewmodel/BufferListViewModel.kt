@@ -28,7 +28,10 @@ data class BufferDisplayItem(
     val unreadCount: Int,
     /** Unread messages that highlighted the user; badged differently from plain unreads. */
     val highlightCount: Int,
-    val number: Int
+    val number: Int,
+    /** IRC server name (or plugin, for non-IRC buffers); the list is sectioned by it. */
+    val network: String,
+    val isPrivate: Boolean
 )
 
 data class HighlightItem(
@@ -47,6 +50,9 @@ class BufferListViewModel @Inject constructor(
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
+
+    /** The relay host, shown in the list's header next to the connection state. */
+    val host: String get() = connectionPrefs.load().host
 
     private val _buffers = MutableStateFlow<List<BufferDisplayItem>>(emptyList())
     val buffers: StateFlow<List<BufferDisplayItem>> = _buffers.asStateFlow()
@@ -133,7 +139,11 @@ class BufferListViewModel @Inject constructor(
                     lastMessageTime = lastLine?.let { formatTime(it.date) } ?: "",
                     unreadCount = hot?.totalCount ?: 0,
                     highlightCount = hot?.highlightCount ?: 0,
-                    number = buf.number
+                    number = buf.number,
+                    network = buf.localVariables["server"]
+                        ?: buf.localVariables["plugin"]
+                        ?: buf.fullName.substringBefore('.'),
+                    isPrivate = buf.localVariables["type"] == "private"
                 )
             }
             .sortedBy { it.number }
