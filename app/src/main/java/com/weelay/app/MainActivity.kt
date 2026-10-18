@@ -1,12 +1,22 @@
 package com.weelay.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.ui.theme.Palette
+import com.weelay.app.service.RelayService
+import com.weelay.app.ui.components.CertificateTrustDialog
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -44,9 +54,41 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var relayClient: RelayClient
+    @Inject lateinit var connectionPrefs: ConnectionPrefs
 
     private val pendingBuffer = mutableStateOf<String?>(null)
     private val deepLinkTrigger = mutableStateOf(0)
+
+    // Text shared from another app, waiting for the user to pick a buffer for it.
+    private val pendingShare = mutableStateOf<String?>(null)
+    // Shared text on its way into the chosen buffer's input, consumed by that ChatScreen.
+    private val pendingDraft = mutableStateOf<String?>(null)
+
+    private fun handleShare(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()
+        if (!text.isNullOrEmpty()) pendingShare.value = text
+    }
+
+    private val requestNotificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            Log.i("Weelay", "POST_NOTIFICATIONS granted=$granted")
+        }
+
+    /**
+     * On Android 13+ POST_NOTIFICATIONS is a runtime permission. Without it the foreground service
+     * still runs, but every highlight and private-message notification is silently dropped — so
+     * ask for it up front rather than letting notifications appear broken.
+     */
+    private fun ensureNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     private fun handleDeepLink(uri: Uri?) {
         Log.w("Weelay", "handleDeepLink: $uri")
@@ -63,14 +105,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        handleShare(intent)
         Log.w("Weelay", "onNewIntent: action=${intent.action} data=${intent.data}")
         handleDeepLink(intent.data)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        Palette.style = connectionPrefs.style
+        // The UI is always dark, so the system bars need light icons regardless of the system
+        // theme; the default (auto) style draws dark icons over the dark top bar in light mode.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+        )
+        ensureNotificationPermission()
         handleDeepLink(intent.data)
+        // Only on a fresh start: after a configuration change the intent is redelivered here and
+        // would offer an already-handled share again.
+        if (savedInstanceState == null) handleShare(intent)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -80,8 +133,41 @@ class MainActivity : ComponentActivity() {
         setContent {
             WeelayTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    // A refused certificate can surface on any screen (a renewed certificate shows
+                    // up on a reconnect, not only on the connect screen), so it's handled here.
+                    val untrustedCert by relayClient.untrustedCertificate.collectAsState()
+                    untrustedCert?.let { cert ->
+                        CertificateTrustDialog(
+                            certificate = cert,
+                            onTrust = {
+                                connectionPrefs.pinnedCertSha256 = cert.sha256
+                                relayClient.dismissUntrustedCertificate()
+                                val saved = connectionPrefs.load()
+                                RelayService.start(
+                                    context = this@MainActivity,
+                                    host = saved.host,
+                                    port = saved.port.toIntOrNull() ?: cert.port,
+                                    password = saved.password,
+                                    useSsl = saved.useSsl
+                                )
+                            },
+                            onDismiss = { relayClient.dismissUntrustedCertificate() }
+                        )
+                    }
+
                     val navController = rememberNavController()
                     val trigger = deepLinkTrigger.value
+
+                    // A share arriving while a chat is open: go back to the buffer list to pick
+                    // where it goes. (Before connecting, the list shows it once it's reached.)
+                    val share = pendingShare.value
+                    LaunchedEffect(share) {
+                        if (share == null) return@LaunchedEffect
+                        val route = navController.currentDestination?.route
+                        if (route != null && route != "connect" && route != "buffers") {
+                            navController.popBackStack("buffers", inclusive = false)
+                        }
+                    }
 
                     // Handle deep link when app is already past connect screen
                     LaunchedEffect(trigger) {
@@ -145,7 +231,13 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("buffers") {
                             BufferListScreen(
+                                shareText = pendingShare.value,
+                                onCancelShare = { pendingShare.value = null },
                                 onBufferClick = { bufferFullName ->
+                                    pendingShare.value?.let {
+                                        pendingDraft.value = it
+                                        pendingShare.value = null
+                                    }
                                     val encoded = URLEncoder.encode(bufferFullName, "UTF-8")
                                     navController.navigate("chat/$encoded")
                                 },
@@ -160,7 +252,12 @@ class MainActivity : ComponentActivity() {
                         }
                         composable("settings") {
                             SettingsScreen(
-                                onBack = { navController.popBackStack() }
+                                onBack = { navController.popBackStack() },
+                                onDisconnected = {
+                                    navController.navigate("connect") {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
                             )
                         }
                         composable(
@@ -180,6 +277,8 @@ class MainActivity : ComponentActivity() {
                             ChatScreen(
                                 bufferFullName = bufferFullName,
                                 targetMessageId = if (targetMessageId != -1L) targetMessageId else null,
+                                initialDraft = pendingDraft.value,
+                                onDraftConsumed = { pendingDraft.value = null },
                                 onBack = { navController.popBackStack() },
                                 onNavigateToBuffer = { targetBuffer ->
                                     val encoded = URLEncoder.encode(targetBuffer, "UTF-8")

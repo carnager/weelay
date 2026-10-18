@@ -1,44 +1,34 @@
 package com.weelay.app.ui.theme
 
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.platform.LocalContext
 
-private val DarkColorScheme = darkColorScheme(
-    primary = Purple80,
-    secondary = PurpleGrey80,
-    tertiary = Pink80
-)
-
-private val LightColorScheme = lightColorScheme(
-    primary = Purple40,
-    secondary = PurpleGrey40,
-    tertiary = Pink40
+// Material components that aren't styled by hand (dialogs, text fields, menus, switches) take
+// their colours from here, so it mirrors Palette rather than following Material You.
+// Built inside the composable so it follows Palette.style.
+@Composable
+private fun weelayColorScheme() = darkColorScheme(
+    primary = Palette.accent,
+    onPrimary = Palette.onAccent,
+    secondary = Palette.link,
+    background = Palette.background,
+    onBackground = Palette.onSurface,
+    surface = Palette.background,
+    onSurface = Palette.onSurface,
+    surfaceVariant = Palette.surface,
+    onSurfaceVariant = Palette.muted,
+    surfaceContainer = Palette.surface,
+    surfaceContainerHigh = Palette.surface,
+    outline = Palette.muted,
+    outlineVariant = Palette.divider,
+    error = Palette.danger
 )
 
 @Composable
-fun WeelayTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
-
+fun WeelayTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = colorScheme,
+        colorScheme = weelayColorScheme(),
         typography = Typography,
         content = content
     )

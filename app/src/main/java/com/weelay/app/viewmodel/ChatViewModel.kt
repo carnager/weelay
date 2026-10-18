@@ -3,6 +3,9 @@ package com.weelay.app.viewmodel
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.data.InputHistory
+import com.weelay.app.data.MessageLayout
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.MessageFormat
 import com.weelay.app.relay.RelayClient
@@ -15,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -28,7 +32,11 @@ data class DisplayMessage(
     val time: String,
     val rawDate: String,
     val nick: String,
-    val isOwnMessage: Boolean
+    val isOwnMessage: Boolean,
+    /** This message mentioned the user — rendered with a distinct bubble in the chat. */
+    val isMention: Boolean = false,
+    /** A /me action. WeeChat sends these with prefix "*" and the nick inside the message. */
+    val isAction: Boolean = false
 )
 
 data class MessageGroup(
@@ -46,7 +54,9 @@ data class MessageGroup(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    private val relayClient: RelayClient
+    private val relayClient: RelayClient,
+    private val connectionPrefs: ConnectionPrefs,
+    private val inputHistory: InputHistory
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
@@ -57,6 +67,24 @@ class ChatViewModel @Inject constructor(
     private val _bufferName = MutableStateFlow("")
     val bufferName: StateFlow<String> = _bufferName.asStateFlow()
 
+    /** The buffer's title — the channel topic, for IRC channels. Empty when there is none. */
+    private val _bufferTitle = MutableStateFlow("")
+    val bufferTitle: StateFlow<String> = _bufferTitle.asStateFlow()
+
+    private val _isChannel = MutableStateFlow(false)
+    val isChannel: StateFlow<Boolean> = _isChannel.asStateFlow()
+
+    /** Read once per screen; flipping the setting takes effect the next time a buffer opens. */
+    val linkPreviews: Boolean get() = connectionPrefs.linkPreviews
+
+    /** The message layout chosen for this kind of buffer. */
+    fun messageLayout(channel: Boolean): MessageLayout =
+        if (channel) connectionPrefs.channelLayout else connectionPrefs.privateLayout
+
+    /** What the user sent in this buffer, newest first; see [InputHistory]. */
+    private val _sentHistory = MutableStateFlow<List<String>>(emptyList())
+    val sentHistory: StateFlow<List<String>> = _sentHistory.asStateFlow()
+
     private val _nicklist = MutableStateFlow<List<RelayNicklistEntry>>(emptyList())
     val nicklist: StateFlow<List<RelayNicklistEntry>> = _nicklist.asStateFlow()
 
@@ -66,6 +94,9 @@ class ChatViewModel @Inject constructor(
     private var currentBufferFullName: String = ""
     private var currentBufferId: Long = -1
     private var ownNick: String = ""
+
+    // Compiled lazily and reset whenever the buffer (and so the nick) changes; see mentionPatterns.
+    private var mentionPatternsCache: List<Regex>? = null
     private val allLines = mutableListOf<RelayLine>()
 
     // Incrementally-maintained derived state, kept in sync with allLines so that a single
@@ -91,6 +122,27 @@ class ChatViewModel @Inject constructor(
     private val _loadedMoreHistory = MutableStateFlow(false)
     val loadedMoreHistory: StateFlow<Boolean> = _loadedMoreHistory.asStateFlow()
 
+    /**
+     * False once the server has no older lines to give. The relay only serves what WeeChat holds
+     * in memory — it never reads the log files — so after a WeeChat restart that can be as little
+     * as `logger.look.backlog` lines per buffer. Without this the "load earlier messages" button
+     * stayed put and silently did nothing.
+     */
+    private val _hasMoreHistory = MutableStateFlow(true)
+    val hasMoreHistory: StateFlow<Boolean> = _hasMoreHistory.asStateFlow()
+
+    /**
+     * Id of the first message that was unread when the buffer was opened, or null if nothing was.
+     * Placed once per opening and then left alone, so new lines arriving while reading don't move
+     * it; the UI draws a "new messages" divider above this message and opens scrolled to it.
+     */
+    private val _readMarkerId = MutableStateFlow<Long?>(null)
+    val readMarkerId: StateFlow<Long?> = _readMarkerId.asStateFlow()
+
+    // Unread count from WeeChat's hotlist, captured before opening the buffer clears it.
+    private var unreadAtOpen = 0
+    private var readMarkerPlaced = false
+
     private val _highlights = MutableStateFlow<List<HighlightItem>>(emptyList())
     val highlights: StateFlow<List<HighlightItem>> = _highlights.asStateFlow()
 
@@ -108,6 +160,7 @@ class ChatViewModel @Inject constructor(
         bufferJobs.clear()
 
         currentBufferFullName = bufferFullName
+        _sentHistory.value = inputHistory.forBuffer(bufferFullName)
         allLines.clear()
         displayMessages.clear()
         groups.clear()
@@ -116,25 +169,47 @@ class ChatViewModel @Inject constructor(
         _initialLoadComplete.value = false
         autoFetchingMore = false
         currentLineCount = 500
+        _hasMoreHistory.value = true
+        _readMarkerId.value = null
+        readMarkerPlaced = false
+        _bufferTitle.value = ""
 
         val buffer = relayClient.buffers.value.find { it.fullName == bufferFullName }
         if (buffer != null) {
             currentBufferId = buffer.id
             _bufferName.value = buffer.shortName ?: buffer.name
             ownNick = buffer.localVariables["nick"] ?: ""
+            mentionPatternsCache = null
         } else {
             _bufferName.value = bufferFullName.substringAfterLast(".")
+            _isChannel.value = bufferFullName.substringAfterLast('.').startsWith('#')
         }
 
-        // Watch for incoming lines (history + real-time) — start collecting BEFORE requesting
+        // Track the buffer's metadata as it changes: topic changes arrive as buffer updates, and a
+        // buffer opened from a deep link may not be in the list yet when the screen first loads.
         bufferJobs += viewModelScope.launch {
-            relayClient.lines.collect { update ->
+            relayClient.buffers.collect { buffers ->
+                val buf = buffers.find { it.fullName == currentBufferFullName } ?: return@collect
+                _bufferTitle.value = MessageFormat.stripIrcFormatting(buf.title).trim()
+                _isChannel.value = MessageFormat.isChannel(buf)
+            }
+        }
+
+        // Watch for incoming lines (history + real-time). The history request is issued from
+        // onSubscription, which runs once this collector is registered on the shared flow — so the
+        // response can't be emitted before we're listening. (This previously relied on a 50ms
+        // delay, which was a race: on a slow frame the backlog was simply dropped.)
+        bufferJobs += viewModelScope.launch {
+            relayClient.lines.onSubscription {
+                relayClient.requestLines(bufferFullName, currentLineCount)
+            }.collect { update ->
                 if (update.bufferName != currentBufferFullName) return@collect
                 val displayed = update.lines.filter { it.displayed }
                 if (update.isHistory) {
-                    // A history batch replaces the whole buffer.
-                    allLines.clear()
-                    allLines.addAll(displayed)
+                    // Fewer lines back than we asked for means we've reached the oldest line the
+                    // server still has in memory, so there is nothing left to page in.
+                    _hasMoreHistory.value = update.lines.size >= currentLineCount
+                    mergeHistory(displayed)
                     rebuildDerivedState(allowAutoFetch = true)
                 } else {
                     // Live lines append incrementally.
@@ -152,23 +227,18 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // Watch for nicklist updates
+        // Watch for nicklist updates, requesting once subscribed for the same reason as above.
         bufferJobs += viewModelScope.launch {
-            relayClient.nicklist.collect { (bufferName, nicks) ->
+            relayClient.nicklist.onSubscription {
+                relayClient.requestNicklist(bufferFullName)
+            }.collect { (bufferName, nicks) ->
                 if (bufferName == currentBufferFullName) {
+                    // Ranked like WeeChat's nicklist: owners, admins, ops, halfops, voiced, rest.
                     _nicklist.value = nicks
                         .filter { it.visible }
-                        .sortedBy { it.name.lowercase() }
+                        .sortedWith(compareBy({ nickRank(it.prefix) }, { it.name.lowercase() }))
                 }
             }
-        }
-
-        // Request history and nicklist after collectors are active
-        // Small delay to ensure coroutine collectors are subscribed
-        bufferJobs += viewModelScope.launch {
-            delay(50)
-            relayClient.requestLines(bufferFullName, currentLineCount)
-            relayClient.requestNicklist(bufferFullName)
         }
 
         // Re-request data when connection recovers (e.g. after phone idle)
@@ -192,8 +262,25 @@ class ChatViewModel @Inject constructor(
         return relayClient.sendInput(currentBufferFullName, text)
     }
 
+    /**
+     * Send what the user typed into the input bar and remember it for recall. Kept apart from
+     * [sendMessage] so commands the UI issues on the user's behalf (kick, ban, …) stay out of it.
+     */
+    fun sendTypedInput(text: String): Boolean {
+        val sent = relayClient.sendInput(currentBufferFullName, text)
+        if (sent) {
+            inputHistory.add(currentBufferFullName, text)
+            _sentHistory.value = inputHistory.forBuffer(currentBufferFullName)
+        }
+        return sent
+    }
+
     /** Called when this buffer becomes visible — marks it active so its unread count is cleared. */
     fun onBufferVisible(fullName: String) {
+        // Read the unread count first: making the buffer active marks it read, which clears it.
+        // This runs before loadBuffer's history arrives, so the marker can be placed from it then.
+        val bufferId = relayClient.buffers.value.find { it.fullName == fullName }?.id
+        unreadAtOpen = bufferId?.let { relayClient.hotlist.value[it]?.totalCount } ?: 0
         relayClient.setActiveBuffer(fullName)
     }
 
@@ -205,8 +292,11 @@ class ChatViewModel @Inject constructor(
     }
 
     fun loadMoreHistory() {
+        if (!_hasMoreHistory.value) return
         previousMessageCount = allLines.size
-        currentLineCount += 100
+        // Step in larger strides: the relay can only widen the window from "now", so a 100-line
+        // bump costs a full refetch to gain very little.
+        currentLineCount += 500
         _loadedMoreHistory.value = true
         relayClient.requestLines(currentBufferFullName, currentLineCount)
     }
@@ -247,16 +337,56 @@ class ChatViewModel @Inject constructor(
 
     /** Map a relay line to a display message (caller has already filtered with isRegularMessage). */
     private fun toDisplayMessage(line: RelayLine): DisplayMessage {
-        val nick = extractNick(line.prefix)
+        val isAction = MessageFormat.isAction(line)
+        val text = MessageFormat.stripIrcFormatting(line.message)
+        // An action's prefix is just "*", so the speaker has to come from the nick_ tag (or, for
+        // lines restored from the log where tags are gone, the leading word of the message).
+        val nick = if (isAction) {
+            MessageFormat.actionNick(line, text)
+        } else {
+            extractNick(line.prefix)
+        }
         val isOwn = nick == ownNick || line.tags.any { it == "nick_$ownNick" }
         return DisplayMessage(
             id = line.id,
-            text = MessageFormat.stripIrcFormatting(line.message),
+            text = text,
             time = formatMessageTime(line.date),
             rawDate = line.date,
             nick = nick,
-            isOwnMessage = isOwn
+            isOwnMessage = isOwn,
+            isMention = !isOwn && (line.highlight || mentionsOwnNick(text)),
+            isAction = isAction
         )
+    }
+
+    /**
+     * Fallback mention detection for lines WeeChat didn't flag.
+     *
+     * Lines restored from the log on a WeeChat restart always come back with highlight=false —
+     * the highlight was evaluated when they were first printed, and re-reading the log doesn't
+     * re-evaluate it. Without this, every mention older than the last restart looks like ordinary
+     * chat. Matches the nick as a whole word so "rasika" doesn't count as a mention of "rasi".
+     */
+    private fun mentionsOwnNick(text: String): Boolean =
+        mentionPatterns().any { it.containsMatchIn(text) }
+
+    /**
+     * Matchers for the nick plus any configured highlight words, built once per buffer load.
+     * WeeChat's own highlight config can't be read over the relay api, so the extra words come
+     * from the app's settings.
+     */
+    private fun mentionPatterns(): List<Regex> {
+        mentionPatternsCache?.let { return it }
+        val words = buildList {
+            if (ownNick.isNotEmpty()) add(ownNick)
+            connectionPrefs.highlightWords
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .forEach { add(it) }
+        }
+        return words.map { MessageFormat.nickMentionRegex(it) }
+            .also { mentionPatternsCache = it }
     }
 
     /**
@@ -275,7 +405,15 @@ class ChatViewModel @Inject constructor(
         } else 0L
         val showTimeSeparator = timeDiffMinutes > groupGapMinutes
 
-        if (last != null && msg.nick == last.nick && !showTimeSeparator) {
+        // Actions stand alone: they read as "* nick does something", so folding them into a
+        // neighbouring group under that group's nick header would misattribute them.
+        val groupable = !msg.isAction && last?.messages?.lastOrNull()?.isAction != true
+
+        // The first unread message opens a group of its own, so it keeps its nick header under the
+        // "new messages" divider rather than continuing the group above it.
+        val startsUnread = msg.id == _readMarkerId.value
+
+        if (groupable && !startsUnread && last != null && msg.nick == last.nick && !showTimeSeparator) {
             // Extend the current group.
             groups[groups.size - 1] = last.copy(messages = last.messages + msg)
         } else {
@@ -299,14 +437,35 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Fold a fetched history batch into [allLines], keyed by line id.
+     *
+     * A history response is a window ending at "now", so it overlaps almost entirely with what we
+     * already have; replacing wholesale meant every "load more" and every reconnect threw away and
+     * re-grouped the full history. Merging keeps live lines that arrived while the fetch was in
+     * flight — those aren't in the response and used to vanish until the next sync line.
+     */
+    private fun mergeHistory(history: List<RelayLine>) {
+        if (history.isEmpty()) return
+
+        val merged = LinkedHashMap<Long, RelayLine>(allLines.size + history.size)
+        // History first so it forms the base ordering, then live lines already held are layered on
+        // top; ids collide for the overlap, which is exactly the dedup we want.
+        for (line in history) merged[line.id] = line
+        for (line in allLines) merged[line.id] = line
+
+        allLines.clear()
+        allLines.addAll(merged.values.sortedBy { it.id })
+
+        // Merging can push us past the retention cap (a bigger window plus lines held from before).
+        if (allLines.size > maxRetainedLines) {
+            repeat(allLines.size - retainAfterTrim) { allLines.removeAt(0) }
+        }
+    }
+
     /** Recompute all derived state from allLines. Used on history loads and after trimming. */
     private fun rebuildDerivedState(allowAutoFetch: Boolean) {
-        displayMessages.clear()
-        groups.clear()
-        collectedUrls.clear()
-        lastMessageTimestamp = null
-
-        for (line in allLines) appendLine(line)
+        regroup()
 
         if (allowAutoFetch) {
             // If we don't have enough real messages, request more (cap at 5000 to avoid infinite fetching).
@@ -322,7 +481,23 @@ class ChatViewModel @Inject constructor(
             }
         }
 
+        if (_initialLoadComplete.value && !readMarkerPlaced) {
+            readMarkerPlaced = true
+            _readMarkerId.value = readMarkerId(displayMessages, unreadAtOpen)
+            // Once, so the marked message can be split off into its own group.
+            if (_readMarkerId.value != null) regroup()
+        }
+
         publish()
+    }
+
+    private fun regroup() {
+        displayMessages.clear()
+        groups.clear()
+        collectedUrls.clear()
+        lastMessageTimestamp = null
+
+        for (line in allLines) appendLine(line)
     }
 
     /** Push the current derived state to the UI. */
@@ -380,3 +555,31 @@ class ChatViewModel @Inject constructor(
         _highlights.value = items
     }
 }
+
+/**
+ * Where the "new messages" divider goes: the oldest of the last [unread] messages that weren't
+ * the user's own. Own messages are skipped because WeeChat never puts them in the hotlist, so
+ * they aren't part of the count. If fewer messages are loaded than were unread, the marker goes
+ * on the oldest loaded one, since everything on screen is new.
+ */
+internal fun readMarkerId(messages: List<DisplayMessage>, unread: Int): Long? {
+    if (unread <= 0) return null
+    var counted = 0
+    var oldestUnread: Long? = null
+    for (message in messages.asReversed()) {
+        if (message.isOwnMessage) continue
+        counted++
+        oldestUnread = message.id
+        if (counted == unread) return oldestUnread
+    }
+    return messages.firstOrNull()?.id ?: oldestUnread
+}
+
+/** Sort key for an IRC nick-mode prefix: higher modes first, unprefixed nicks last. */
+internal fun nickRank(prefix: String): Int {
+    val mode = prefix.trim().firstOrNull() ?: return NICK_MODE_ORDER.length
+    val rank = NICK_MODE_ORDER.indexOf(mode)
+    return if (rank >= 0) rank else NICK_MODE_ORDER.length
+}
+
+private const val NICK_MODE_ORDER = "~&@%+"

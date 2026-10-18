@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import com.weelay.app.ui.theme.Palette
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -44,7 +45,25 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.History
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -95,10 +114,15 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.ui.components.HighlightsSheet
+import com.weelay.app.ui.components.CompactMessageRow
+import com.weelay.app.ui.components.GroupedMessageRow
+import com.weelay.app.data.MessageLayout
 import com.weelay.app.ui.components.MessageBubble
 import com.weelay.app.ui.components.NickActionSheet
 import com.weelay.app.ui.theme.nickColor
 import com.weelay.app.viewmodel.ChatViewModel
+import com.weelay.app.relay.RelayNicklistEntry
+import com.weelay.app.viewmodel.DisplayMessage
 import com.weelay.app.viewmodel.MessageGroup
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -108,6 +132,9 @@ import kotlinx.coroutines.launch
 fun ChatScreen(
     bufferFullName: String,
     targetMessageId: Long? = null,
+    /** Text shared from another app, put into the input for the user to edit and send. */
+    initialDraft: String? = null,
+    onDraftConsumed: () -> Unit = {},
     onBack: () -> Unit,
     onNavigateToBuffer: (String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
@@ -118,8 +145,29 @@ fun ChatScreen(
     val urls by viewModel.urls.collectAsState()
     val loadedMoreHistory by viewModel.loadedMoreHistory.collectAsState()
     val initialLoadComplete by viewModel.initialLoadComplete.collectAsState()
+    val hasMoreHistory by viewModel.hasMoreHistory.collectAsState()
     val connectionState by viewModel.connectionState.collectAsState()
+    val readMarkerId by viewModel.readMarkerId.collectAsState()
+    val bufferTitle by viewModel.bufferTitle.collectAsState()
+    val isChannel by viewModel.isChannel.collectAsState()
+    val showLinkPreviews = remember { viewModel.linkPreviews }
+    val layout = remember(isChannel) { viewModel.messageLayout(isChannel) }
+    var showTopic by remember { mutableStateOf(false) }
+    var messageMenuFor by remember { mutableStateOf<Pair<MessageGroup, DisplayMessage>?>(null) }
+    // A kick or ban waiting for confirmation: the command to send, and a description of it.
+    var pendingModAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
+    val sentHistory by viewModel.sentHistory.collectAsState()
+    var showHistoryMenu by remember { mutableStateOf(false) }
+    // Hardware-keyboard recall: which history entry is in the input (-1 = none), and what was
+    // typed before recalling started, so Down past the newest entry gives it back.
+    var historyIndex by remember { mutableStateOf(-1) }
+    var historyDraft by remember { mutableStateOf("") }
+    fun recall(index: Int) {
+        val text = if (index < 0) historyDraft else sentHistory[index]
+        historyIndex = index
+        inputText = TextFieldValue(text, TextRange(text.length))
+    }
     val listState = rememberLazyListState()
     var selectedNick by remember { mutableStateOf<String?>(null) }
     var showNicklist by remember { mutableStateOf(false) }
@@ -136,13 +184,14 @@ fun ChatScreen(
     val inputFieldFocusRequester = remember { FocusRequester() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
+    val haptic = LocalHapticFeedback.current
     var replyToNick by remember { mutableStateOf<String?>(null) }
     var replyToMessage by remember { mutableStateOf<String?>(null) }
-    var replyToColor by remember { mutableStateOf(Color(0xFF00A884)) }
+    var replyToColor by remember { mutableStateOf(Palette.accent) }
     var justSentMessage by remember { mutableStateOf(false) }
     var oldestMessageId by remember { mutableStateOf<Long?>(null) }
-
-    val isChannel = bufferFullName.contains("#")
 
     val showScrollToBottom by remember {
         derivedStateOf {
@@ -150,6 +199,47 @@ fun ChatScreen(
             val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = layoutInfo.totalItemsCount
             totalItems > 0 && lastVisibleItem < totalItems - 3
+        }
+    }
+
+    // Stay pinned to the bottom while content there grows. Link previews load after the list is
+    // laid out and make the last message taller, which used to leave the view stranded a little
+    // short of the newest message. Pinned once the list reaches the end; released as soon as the
+    // user scrolls away from it.
+    var stickToBottom by remember { mutableStateOf(false) }
+    val pinning = remember { booleanArrayOf(false) } // our own corrective scroll is in flight
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.isScrollInProgress to listState.canScrollForward }
+            .collect { (scrolling, canScrollForward) ->
+                if (pinning[0]) return@collect
+                if (!canScrollForward) stickToBottom = true
+                else if (scrolling) stickToBottom = false
+            }
+    }
+    LaunchedEffect(listState) {
+        // How far the end of the list sits below the viewport: 0 when pinned exactly, null for an
+        // empty list, and PUSHED_OUT when growth further up pushed the last item off screen.
+        snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()
+            when {
+                last == null -> null
+                last.index != info.totalItemsCount - 1 -> PUSHED_OUT
+                else -> last.offset + last.size + info.afterContentPadding - info.viewportEndOffset
+            }
+        }.collect { overflow ->
+            if (overflow == null || overflow <= 0) return@collect
+            if (!stickToBottom || listState.isScrollInProgress) return@collect
+            pinning[0] = true
+            try {
+                if (overflow == PUSHED_OUT) {
+                    listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+                } else {
+                    listState.scrollBy(overflow.toFloat())
+                }
+            } finally {
+                pinning[0] = false
+            }
         }
     }
 
@@ -187,6 +277,14 @@ fun ChatScreen(
         }
     }
 
+    LaunchedEffect(initialDraft) {
+        if (initialDraft != null) {
+            inputText = TextFieldValue(initialDraft, TextRange(initialDraft.length))
+            onDraftConsumed()
+            inputFieldFocusRequester.requestFocus()
+        }
+    }
+
     LaunchedEffect(showSearch) {
         if (showSearch) {
             inputFocusRequester.requestFocus()
@@ -220,50 +318,23 @@ fun ChatScreen(
                 // Wait a frame for Compose to lay out the items
                 delay(50)
 
-                if (targetMessageId != null && !scrolledToTarget) {
-                    // Find and scroll to the target message
-                    var itemIndex = 1
-                    var found = false
-                    for (group in messages) {
-                        if (group.showTimestamp) itemIndex++
-                        for (msg in group.messages) {
-                            if (msg.id == targetMessageId) {
-                                listState.scrollToItem(itemIndex)
-                                highlightedMessageId = targetMessageId
-                                scrolledToTarget = true
-                                found = true
-                                break
-                            }
-                            itemIndex++
-                        }
-                        if (found) break
-                    }
-                    if (!found) {
-                        listState.scrollToItem(lastIndex)
-                    }
-                } else {
-                    listState.scrollToItem(lastIndex)
+                // Where to open: a message jumped to from a highlight wins, then the first unread
+                // message, then the bottom.
+                val targetIndex = targetMessageId?.let { itemIndexOf(messages, it) }
+                if (targetIndex != null && !scrolledToTarget) {
+                    highlightedMessageId = targetMessageId
+                    scrolledToTarget = true
                 }
+                val openIndex = targetIndex
+                    ?: readMarkerId?.let { itemIndexOf(messages, it) }
+                    ?: lastIndex
+                listState.scrollToItem(openIndex)
                 if (!contentReady) {
                     initialLoadTime = System.currentTimeMillis()
                     contentReady = true
                     delay(300)
                     // Re-scroll after settle (link previews etc. may have shifted layout)
-                    if (targetMessageId != null && scrolledToTarget) {
-                        var itemIndex = 1
-                        for (group in messages) {
-                            if (group.showTimestamp) itemIndex++
-                            for (msg in group.messages) {
-                                if (msg.id == targetMessageId) {
-                                    listState.scrollToItem(itemIndex)
-                                    break
-                                }
-                                itemIndex++
-                            }
-                        }
-                    } else {
-                        listState.scrollToItem(lastIndex)
-                    }
+                    listState.scrollToItem(openIndex)
                     showContent = true
                 }
             } else if (loadedMoreHistory && oldestMessageId != null) {
@@ -315,15 +386,91 @@ fun ChatScreen(
                 val targetBuffer = viewModel.nickservInfo(nick)
                 onNavigateToBuffer(targetBuffer)
             },
+            // Kick and ban are a swipe and a tap away and can't be undone from here, so they ask
+            // first. Quiet is milder and stays one tap.
             onBan = {
-                viewModel.sendMessage("/ban $nick")
+                pendingModAction = "/ban $nick" to "Ban $nick from $bufferName?"
             },
             onKick = {
-                viewModel.sendMessage("/kick $nick")
+                pendingModAction = "/kick $nick" to "Kick $nick from $bufferName?"
             },
             onQuiet = {
                 viewModel.sendMessage("/quiet $nick")
             }
+        )
+    }
+
+    pendingModAction?.let { (command, question) ->
+        AlertDialog(
+            onDismissRequest = { pendingModAction = null },
+            text = { Text(question) },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.sendMessage(command)
+                    pendingModAction = null
+                }) { Text(if (command.startsWith("/ban")) "Ban" else "Kick", color = Palette.danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingModAction = null }) { Text("Cancel") }
+            },
+            containerColor = Palette.surface
+        )
+    }
+
+    if (showTopic && bufferTitle.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { showTopic = false },
+            title = { Text(bufferName) },
+            text = {
+                Column {
+                    SelectionContainer {
+                        Text(bufferTitle, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    // Selectable text can't also take link taps, so the topic's links get their own
+                    // rows underneath.
+                    val topicLinks = remember(bufferTitle) {
+                        TOPIC_URL.findAll(bufferTitle).map { it.value.trimEnd('.', ',', ')') }
+                            .distinct().toList()
+                    }
+                    topicLinks.forEach { url ->
+                        Text(
+                            text = url,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Palette.link,
+                            textDecoration = TextDecoration.Underline,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { uriHandler.openUri(url) }
+                                .padding(top = 12.dp)
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showTopic = false }) { Text("Close") }
+            },
+            containerColor = Palette.surface
+        )
+    }
+
+    messageMenuFor?.let { (group, message) ->
+        MessageActionSheet(
+            onDismiss = { messageMenuFor = null },
+            onCopy = {
+                clipboard.setText(AnnotatedString(message.text))
+                // Android 13+ shows its own confirmation when something is copied.
+                if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onReply = {
+                replyToNick = group.nick
+                replyToMessage = message.text
+                replyToColor = group.nickColor
+            },
+            onNickActions = if (group.isOwnMessage) null else ({ selectedNick = group.nick })
         )
     }
 
@@ -358,7 +505,7 @@ fun ChatScreen(
     // Nicklist bottom sheet
     if (showNicklist) {
         NicklistSheet(
-            nicks = nicklist.map { it.name },
+            nicks = nicklist,
             onDismiss = { showNicklist = false },
             onNickClick = { nick ->
                 showNicklist = false
@@ -417,21 +564,21 @@ fun ChatScreen(
                                     highlightedMessageId = null
                                 }
                             },
-                            placeholder = { Text("Search...", color = Color(0xFF8696A0)) },
+                            placeholder = { Text("Search...", color = Palette.muted) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(inputFocusRequester),
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 15.sp,
-                                color = Color(0xFFE9EDEF)
+                                color = Palette.onSurface
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
-                                cursorColor = Color(0xFF00A884)
+                                cursorColor = Palette.accent
                             )
                         )
                     },
@@ -447,7 +594,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Close search",
-                                tint = Color(0xFFE9EDEF)
+                                tint = Palette.onSurface
                             )
                         }
                     },
@@ -455,7 +602,7 @@ fun ChatScreen(
                         if (searchResults.isNotEmpty()) {
                             Text(
                                 text = "${currentSearchIndex + 1}/${searchResults.size}",
-                                color = Color(0xFF8696A0),
+                                color = Palette.muted,
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(end = 4.dp)
                             )
@@ -476,7 +623,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Previous",
-                                tint = if (currentSearchIndex > 0) Color(0xFFE9EDEF) else Color(0xFF8696A0),
+                                tint = if (currentSearchIndex > 0) Palette.onSurface else Palette.muted,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .graphicsLayer { rotationZ = 180f }
@@ -498,24 +645,41 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Next",
-                                tint = if (currentSearchIndex < searchResults.size - 1) Color(0xFFE9EDEF) else Color(0xFF8696A0),
+                                tint = if (currentSearchIndex < searchResults.size - 1) Palette.onSurface else Palette.muted,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color(0xFF1F2C34)
+                        containerColor = Palette.surface
                     )
                 )
             } else {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = bufferName,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 18.sp
+                        Column(
+                            modifier = if (bufferTitle.isNotEmpty()) {
+                                Modifier.clickable { showTopic = true }
+                            } else Modifier
+                        ) {
+                            Text(
+                                text = bufferName,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontSize = 18.sp
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                        )
+                            if (bufferTitle.isNotEmpty()) {
+                                Text(
+                                    text = bufferTitle,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                                    color = Palette.muted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
@@ -533,14 +697,14 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.Notifications,
                                 contentDescription = "Highlights",
-                                tint = Color(0xFF8696A0)
+                                tint = Palette.muted
                             )
                         }
                         IconButton(onClick = { showSearch = true }) {
                             Icon(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = "Search",
-                                tint = Color(0xFF8696A0)
+                                tint = Palette.muted
                             )
                         }
                         if (urls.isNotEmpty()) {
@@ -548,7 +712,7 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.Link,
                                     contentDescription = "URLs",
-                                    tint = Color(0xFF8696A0)
+                                    tint = Palette.muted
                                 )
                             }
                         }
@@ -557,18 +721,18 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.Group,
                                     contentDescription = "Nicklist",
-                                    tint = Color(0xFF8696A0)
+                                    tint = Palette.muted
                                 )
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color(0xFF1F2C34)
+                        containerColor = Palette.surface
                     )
                 )
             }
         },
-        containerColor = Color(0xFF0B141A)
+        containerColor = Palette.background
     ) { padding ->
         Column(
             modifier = Modifier
@@ -587,8 +751,9 @@ fun ChatScreen(
                     else -> ""
                 }
                 val bannerColor = when (connectionState) {
-                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Color(0xFF1B5E20)
-                    else -> Color(0xFFB71C1C)
+                    // Amber: in progress, not yet a failure — green read as "all good".
+                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Palette.bannerProgress
+                    else -> Palette.bannerError
                 }
                 Box(
                     modifier = Modifier
@@ -623,19 +788,31 @@ fun ChatScreen(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    // Remember the currently oldest message
-                                    oldestMessageId = messages.firstOrNull()
-                                        ?.messages?.firstOrNull()?.id
-                                    viewModel.loadMoreHistory()
-                                }
+                                .then(
+                                    if (hasMoreHistory) {
+                                        Modifier.clickable {
+                                            // Remember the currently oldest message
+                                            oldestMessageId = messages.firstOrNull()
+                                                ?.messages?.firstOrNull()?.id
+                                            viewModel.loadMoreHistory()
+                                        }
+                                    } else Modifier
+                                )
                                 .padding(vertical = 12.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Load earlier messages",
+                                text = if (hasMoreHistory) {
+                                    "Load earlier messages"
+                                } else {
+                                    "Beginning of available history"
+                                },
                                 style = MaterialTheme.typography.labelMedium,
-                                color = Color(0xFF53BDEB)
+                                color = if (hasMoreHistory) {
+                                    Palette.link
+                                } else {
+                                    Palette.muted
+                                }
                             )
                         }
                     }
@@ -651,32 +828,69 @@ fun ChatScreen(
                             items = group.messages,
                             key = { it.id }
                         ) { message ->
-                            SwipeableMessage(
-                                onSwipeRight = {
-                                    replyToNick = group.nick
-                                    replyToMessage = message.text
-                                    replyToColor = group.nickColor
-                                },
-                                onSwipeLeft = {
-                                    selectedNick = group.nick
+                            // Drawn inside the message's own item rather than as a list item of its
+                            // own, so the item indices that search and jumps compute stay valid.
+                            Column {
+                                if (message.id == readMarkerId) NewMessagesDivider()
+                                SwipeableMessage(
+                                    onSwipeRight = {
+                                        replyToNick = group.nick
+                                        replyToMessage = message.text
+                                        replyToColor = group.nickColor
+                                    },
+                                    onSwipeLeft = {
+                                        selectedNick = group.nick
+                                    }
+                                ) {
+                                    val insertNick: (String) -> Unit = { nick ->
+                                        val text = inputText.text
+                                        val suffix = if (text.isEmpty()) "$nick: " else "$nick "
+                                        val newText = text + suffix
+                                        inputText = TextFieldValue(newText, TextRange(newText.length))
+                                    }
+                                    val openMenu = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        messageMenuFor = group to message
+                                    }
+                                    val query = if (showSearch && searchQuery.length >= 2) searchQuery else null
+                                    when (layout) {
+                                    MessageLayout.LINES -> CompactMessageRow(
+                                            message = message,
+                                            nick = group.nick,
+                                            nickColor = group.nickColor,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onNickClick = insertNick,
+                                            onLongPress = openMenu
+                                        )
+                                    MessageLayout.GROUPED -> GroupedMessageRow(
+                                            message = message,
+                                            nick = group.nick,
+                                            nickColor = group.nickColor,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onNickClick = insertNick,
+                                            onLongPress = openMenu
+                                        )
+                                    MessageLayout.BUBBLES -> MessageBubble(
+                                            message = message,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            isLastInGroup = message == group.messages.last(),
+                                            isOwnMessage = group.isOwnMessage,
+                                            onNickClick = insertNick,
+                                            nick = group.nick,
+                                            nickColorValue = group.nickColor,
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onLongPress = openMenu
+                                        )
+                                    }
                                 }
-                            ) {
-                                MessageBubble(
-                                    message = message,
-                                    isFirstInGroup = message == group.messages.first(),
-                                    isLastInGroup = message == group.messages.last(),
-                                    isOwnMessage = group.isOwnMessage,
-                                    onNickClick = { nick ->
-                                    val text = inputText.text
-                                    val suffix = if (text.isEmpty()) "$nick: " else "$nick "
-                                    val newText = text + suffix
-                                    inputText = TextFieldValue(newText, TextRange(newText.length))
-                                },
-                                    nick = group.nick,
-                                    nickColorValue = group.nickColor,
-                                    searchQuery = if (showSearch && searchQuery.length >= 2) searchQuery else null,
-                                    isHighlighted = message.id == highlightedMessageId
-                                )
                             }
                         }
                     }
@@ -702,8 +916,8 @@ fun ChatScreen(
                         },
                         modifier = Modifier.size(40.dp),
                         shape = CircleShape,
-                        containerColor = Color(0xFF1F2C34),
-                        contentColor = Color(0xFF8696A0),
+                        containerColor = Palette.surface,
+                        contentColor = Palette.muted,
                         elevation = FloatingActionButtonDefaults.elevation(
                             defaultElevation = 4.dp
                         )
@@ -757,7 +971,7 @@ fun ChatScreen(
                         Text(
                             text = replyToMessage ?: "",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                            color = Color(0xFF8696A0),
+                            color = Palette.muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -772,7 +986,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cancel reply",
-                            tint = Color(0xFF8696A0),
+                            tint = Palette.muted,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -812,7 +1026,7 @@ fun ChatScreen(
                                     val newText = "$prefix$nick$suffix"
                                     inputText = TextFieldValue(newText, TextRange(newText.length))
                                 }
-                                .background(Color(0xFF1F2C34), MaterialTheme.shapes.small)
+                                .background(Palette.surface, MaterialTheme.shapes.small)
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
@@ -834,24 +1048,89 @@ fun ChatScreen(
             ) {
                 OutlinedTextField(
                     value = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder = {
-                        Text("Message", color = Color(0xFF8696A0))
+                    onValueChange = {
+                        // Editing a recalled entry makes it a new draft rather than history.
+                        if (it.text != inputText.text) historyIndex = -1
+                        inputText = it
                     },
+                    placeholder = {
+                        Text("Message", color = Palette.muted)
+                    },
+                    trailingIcon = if (inputText.text.isEmpty() && sentHistory.isNotEmpty()) {
+                        {
+                            Box {
+                                IconButton(onClick = { showHistoryMenu = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = "Sent messages",
+                                        tint = Palette.muted
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showHistoryMenu,
+                                    onDismissRequest = { showHistoryMenu = false },
+                                    modifier = Modifier
+                                        .background(Palette.surface)
+                                        .widthIn(max = 320.dp)
+                                ) {
+                                    sentHistory.take(15).forEach { entry ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    entry,
+                                                    color = Palette.onSurface,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            onClick = {
+                                                showHistoryMenu = false
+                                                inputText = TextFieldValue(entry, TextRange(entry.length))
+                                                inputFieldFocusRequester.requestFocus()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else null,
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(inputFieldFocusRequester),
+                        .focusRequester(inputFieldFocusRequester)
+                        // Up/Down on a hardware keyboard step through what was sent, as in
+                        // WeeChat. Up only takes over while the input is empty or already showing
+                        // a recalled entry, so it still moves the cursor in a typed draft.
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    val browsing = historyIndex >= 0 || inputText.text.isEmpty()
+                                    if (!browsing || historyIndex >= sentHistory.size - 1) {
+                                        return@onPreviewKeyEvent false
+                                    }
+                                    if (historyIndex < 0) historyDraft = inputText.text
+                                    recall(historyIndex + 1)
+                                    true
+                                }
+                                Key.DirectionDown -> {
+                                    if (historyIndex < 0) return@onPreviewKeyEvent false
+                                    recall(historyIndex - 1)
+                                    true
+                                }
+                                else -> false
+                            }
+                        },
                     shape = MaterialTheme.shapes.extraLarge,
                     singleLine = false,
                     maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF1F2C34),
-                        unfocusedContainerColor = Color(0xFF1F2C34),
+                        focusedContainerColor = Palette.surface,
+                        unfocusedContainerColor = Palette.surface,
                         focusedBorderColor = Color.Transparent,
                         unfocusedBorderColor = Color.Transparent,
-                        focusedTextColor = Color(0xFFE9EDEF),
-                        unfocusedTextColor = Color(0xFFE9EDEF),
-                        cursorColor = Color(0xFF00A884)
+                        focusedTextColor = Palette.onSurface,
+                        unfocusedTextColor = Palette.onSurface,
+                        cursorColor = Palette.accent
                     )
                 )
 
@@ -863,7 +1142,8 @@ fun ChatScreen(
                             } else {
                                 inputText.text.trim()
                             }
-                            if (viewModel.sendMessage(msg)) {
+                            if (viewModel.sendTypedInput(msg)) {
+                                historyIndex = -1
                                 inputText = TextFieldValue("")
                                 replyToNick = null
                                 replyToMessage = null
@@ -882,7 +1162,7 @@ fun ChatScreen(
                         .padding(start = 4.dp)
                         .size(48.dp),
                     shape = CircleShape,
-                    containerColor = Color(0xFF00A884),
+                    containerColor = Palette.accent,
                     elevation = FloatingActionButtonDefaults.elevation(
                         defaultElevation = 2.dp
                     )
@@ -890,7 +1170,7 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = Color(0xFF0B141A),
+                        tint = Palette.onAccent,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -899,37 +1179,122 @@ fun ChatScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TimestampSeparator(timestamp: String) {
-    Box(
+private fun MessageActionSheet(
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    onReply: () -> Unit,
+    onNickActions: (() -> Unit)?
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(),
+        containerColor = Palette.surface,
+        dragHandle = null
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            MessageActionRow(Icons.Default.ContentCopy, "Copy text") { onCopy(); onDismiss() }
+            MessageActionRow(Icons.AutoMirrored.Filled.Reply, "Reply") { onReply(); onDismiss() }
+            onNickActions?.let { action ->
+                MessageActionRow(Icons.Default.Person, "Nick actions") { onDismiss(); action() }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit
+) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Icon(icon, contentDescription = null, tint = Palette.onSurface, modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Palette.onSurface)
+    }
+}
+
+/** Sentinel for the bottom-pinning logic: the last item was pushed out of the viewport. */
+private const val PUSHED_OUT = Int.MAX_VALUE
+
+private val TOPIC_URL = Regex("""https?://[^\s<>"{}|\\^`\[\]]+""")
+
+/**
+ * LazyColumn index of the message with [id]: one item for the "load earlier" row, then per group
+ * an optional timestamp separator followed by one item per message. Null if it isn't loaded.
+ */
+private fun itemIndexOf(groups: List<MessageGroup>, id: Long): Int? {
+    var index = 1
+    for (group in groups) {
+        if (group.showTimestamp) index++
+        for (msg in group.messages) {
+            if (msg.id == id) return index
+            index++
+        }
+    }
+    return null
+}
+
+@Composable
+private fun NewMessagesDivider() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.accent)
+        Text(
+            text = "New messages",
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+            color = Palette.accent,
+            modifier = Modifier.padding(horizontal = 8.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.accent)
+    }
+}
+
+@Composable
+private fun TimestampSeparator(timestamp: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.divider)
         Text(
             text = timestamp,
             style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp
+                fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             ),
-            color = Color(0xFF8696A0),
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 4.dp)
+            color = Palette.muted,
+            modifier = Modifier.padding(horizontal = 8.dp)
         )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.divider)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NicklistSheet(
-    nicks: List<String>,
+    nicks: List<RelayNicklistEntry>,
     onDismiss: () -> Unit,
     onNickClick: (String) -> Unit
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(
@@ -943,16 +1308,18 @@ private fun NicklistSheet(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFFE9EDEF),
+                color = Palette.onSurface,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
             )
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             LazyColumn(
                 modifier = Modifier.height(400.dp)
             ) {
-                items(items = nicks, key = { it }) { nick ->
+                items(items = nicks, key = { it.name }) { entry ->
+                    val nick = entry.name
+                    val mode = entry.prefix.trim()
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -968,10 +1335,25 @@ private fun NicklistSheet(
                             drawCircle(color = color)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
+                        // Fixed-width slot so names line up whether or not a nick has a mode.
+                        Text(
+                            text = mode,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = when (mode.firstOrNull()) {
+                                '~', '&', '@' -> Color(0xFF81C784)
+                                '%' -> Color(0xFFFFB74D)
+                                '+' -> Color(0xFFFFF176)
+                                else -> Palette.muted
+                            },
+                            modifier = Modifier.width(14.dp)
+                        )
                         Text(
                             text = nick,
                             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                            color = Color(0xFFE9EDEF)
+                            color = Palette.onSurface
                         )
                     }
                 }
@@ -991,7 +1373,7 @@ private fun UrlListSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(
@@ -1005,11 +1387,11 @@ private fun UrlListSheet(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFFE9EDEF),
+                color = Palette.onSurface,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
             )
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             LazyColumn(
                 modifier = Modifier.height(400.dp)
@@ -1024,20 +1406,20 @@ private fun UrlListSheet(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = Color(0xFF53BDEB),
+                            color = Palette.link,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "by $nick",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = Color(0xFF8696A0),
+                            color = Palette.muted,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 20.dp),
-                        color = Color(0xFF233039)
+                        color = Palette.divider
                     )
                 }
             }
@@ -1120,7 +1502,7 @@ private fun SwipeableMessage(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Reply,
                     contentDescription = "Reply",
-                    tint = Color(0xFF00A884).copy(
+                    tint = Palette.accent.copy(
                         alpha = (animatedOffset / threshold).coerceIn(0f, 1f)
                     ),
                     modifier = Modifier.size(22.dp)
@@ -1140,7 +1522,7 @@ private fun SwipeableMessage(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "Nick actions",
-                    tint = Color(0xFF00A884).copy(
+                    tint = Palette.accent.copy(
                         alpha = ((-animatedOffset) / threshold).coerceIn(0f, 1f)
                     ),
                     modifier = Modifier.size(22.dp)

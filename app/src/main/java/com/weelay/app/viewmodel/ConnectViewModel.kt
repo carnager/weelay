@@ -1,10 +1,12 @@
 package com.weelay.app.viewmodel
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.weelay.app.data.ConnectionPrefs
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.RelayClient
+import com.weelay.app.service.RelayService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,7 @@ data class ConnectUiState(
 
 @HiltViewModel
 class ConnectViewModel @Inject constructor(
+    private val application: Application,
     private val relayClient: RelayClient,
     private val connectionPrefs: ConnectionPrefs
 ) : ViewModel() {
@@ -34,13 +37,13 @@ class ConnectViewModel @Inject constructor(
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
 
     /** True if we attempted auto-connect on startup */
-    private val _autoConnecting = MutableStateFlow(connectionPrefs.hasSaved())
+    private val _autoConnecting = MutableStateFlow(shouldAutoConnect())
     val autoConnecting: StateFlow<Boolean> = _autoConnecting.asStateFlow()
 
     init {
         if (connectionPrefs.hasSaved()) {
             _uiState.value = connectionPrefs.load()
-            connect()
+            if (shouldAutoConnect()) connect()
         }
         viewModelScope.launch {
             relayClient.errorMessage.collect { error ->
@@ -51,6 +54,14 @@ class ConnectViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * Connect on launch only if the last session wasn't ended on purpose. After an explicit
+     * disconnect (or a rejected password) the form is shown pre-filled instead, so the user
+     * decides when to go back online.
+     */
+    private fun shouldAutoConnect(): Boolean =
+        connectionPrefs.hasSaved() && connectionPrefs.shouldAutoConnect
 
     fun onHostChange(host: String) {
         _uiState.update { it.copy(host = host) }
@@ -106,7 +117,9 @@ class ConnectViewModel @Inject constructor(
             useSsl = state.useSsl
         )
 
-        relayClient.connect(
+        // The service owns the connection so it survives the app being backgrounded.
+        RelayService.start(
+            context = application,
             host = state.host.trim(),
             port = port,
             password = state.password,

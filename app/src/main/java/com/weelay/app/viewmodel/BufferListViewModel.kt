@@ -24,8 +24,14 @@ data class BufferDisplayItem(
     val isChannel: Boolean,
     val lastMessage: String,
     val lastMessageTime: String,
+    /** Unread messages, from WeeChat's hotlist. Includes [highlightCount]. */
     val unreadCount: Int,
-    val number: Int
+    /** Unread messages that highlighted the user; badged differently from plain unreads. */
+    val highlightCount: Int,
+    val number: Int,
+    /** IRC server name (or plugin, for non-IRC buffers); the list is sectioned by it. */
+    val network: String,
+    val isPrivate: Boolean
 )
 
 data class HighlightItem(
@@ -45,6 +51,9 @@ class BufferListViewModel @Inject constructor(
 
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
 
+    /** The relay host, shown in the list's header next to the connection state. */
+    val host: String get() = connectionPrefs.load().host
+
     private val _buffers = MutableStateFlow<List<BufferDisplayItem>>(emptyList())
     val buffers: StateFlow<List<BufferDisplayItem>> = _buffers.asStateFlow()
 
@@ -60,49 +69,50 @@ class BufferListViewModel @Inject constructor(
     // Track latest line per buffer from sync events
     private val latestLinePerBuffer = mutableMapOf<Long, RelayLine>()
 
-    // Unread message count per buffer full name. Incremented for live messages to buffers the
-    // user isn't currently viewing, reset to 0 when a buffer becomes active.
-    private val unreadByName = mutableMapOf<String, Int>()
+    // Buffers already given a deeper history fetch to find a preview message; see
+    // requestPreviewBackfill.
+    private val previewBackfillRequested = mutableSetOf<Long>()
 
     init {
         viewModelScope.launch {
             relayClient.buffers.collect { relayBuffers ->
+                // An empty list means we disconnected; allow backfills to be retried next session.
+                if (relayBuffers.isEmpty()) previewBackfillRequested.clear()
                 buildDisplayItems(relayBuffers)
+                requestPreviewBackfill(relayBuffers)
             }
         }
 
-        // Listen for new lines from sync to update last message preview and unread counts
+        // Unread counts come from WeeChat's hotlist rather than being tallied here, so they are
+        // already correct on the first frame after connecting and stay in step with the desktop.
         viewModelScope.launch {
-            relayClient.lines.collect { update ->
-                val active = relayClient.activeBuffer.value
-                for (line in update.lines) {
-                    if (line.bufferId != 0L && isRegularMessage(line)) {
-                        latestLinePerBuffer[line.bufferId] = line
-                        // Only live messages to a buffer that isn't on screen count as unread.
-                        if (!update.isHistory && update.bufferName != active) {
-                            unreadByName[update.bufferName] = (unreadByName[update.bufferName] ?: 0) + 1
-                        }
-                    }
-                    if (line.highlight && line.displayed && line.message.isNotBlank()) {
-                        highlightLines.add(update.bufferName to line)
-                    }
-                }
+            relayClient.hotlist.collect {
                 refreshBufferDisplay()
             }
         }
 
-        // Reset unread for whichever buffer the user opens.
+        // Listen for new lines from sync to update the last-message preview. Highlights are not
+        // collected here: RelayClient already accumulates them (from history and live sync alike)
+        // in one bounded list, and keeping a second copy here only risked the two drifting apart.
         viewModelScope.launch {
-            relayClient.activeBuffer.collect { active ->
-                if (active != null && unreadByName.remove(active) != null) {
-                    refreshBufferDisplay()
+            relayClient.lines.collect { update ->
+                for (line in update.lines) {
+                    if (line.bufferId == 0L || !isRegularMessage(line)) continue
+                    // Keep the newest: a history response can land after a live line that it
+                    // doesn't include, and must not roll the preview back. Ids rise within a buffer.
+                    val current = latestLinePerBuffer[line.bufferId]
+                    if (current == null || line.id >= current.id) {
+                        latestLinePerBuffer[line.bufferId] = line
+                    }
                 }
+                refreshBufferDisplay()
             }
         }
     }
 
     private fun buildDisplayItems(relayBuffers: List<com.weelay.app.relay.RelayBuffer>) {
         val hideSpecial = connectionPrefs.hideSpecialBuffers
+        val hotlist = relayClient.hotlist.value
 
         val displayItems = relayBuffers
             .filter { !it.hidden }
@@ -117,8 +127,9 @@ class BufferListViewModel @Inject constructor(
             .map { buf ->
                 val lastLine = latestLinePerBuffer[buf.id]?.takeIf { isRegularMessage(it) }
                     ?: buf.lines.lastOrNull { isRegularMessage(it) }
-                val isChannel = buf.fullName.contains("#") ||
-                        buf.localVariables["type"] == "channel"
+                val isChannel = MessageFormat.isChannel(buf)
+
+                val hot = hotlist[buf.id]
 
                 BufferDisplayItem(
                     fullName = buf.fullName,
@@ -126,13 +137,44 @@ class BufferListViewModel @Inject constructor(
                     isChannel = isChannel,
                     lastMessage = lastLine?.let { MessageFormat.stripIrcFormatting(it.message) } ?: "",
                     lastMessageTime = lastLine?.let { formatTime(it.date) } ?: "",
-                    unreadCount = unreadByName[buf.fullName] ?: 0,
-                    number = buf.number
+                    unreadCount = hot?.totalCount ?: 0,
+                    highlightCount = hot?.highlightCount ?: 0,
+                    number = buf.number,
+                    network = buf.localVariables["server"]
+                        ?: buf.localVariables["plugin"]
+                        ?: buf.fullName.substringBefore('.'),
+                    isPrivate = buf.localVariables["type"] == "private"
                 )
             }
             .sortedBy { it.number }
 
         _buffers.value = displayItems
+    }
+
+    /**
+     * Fetch a deeper slice of history for buffers whose preview came back empty.
+     *
+     * The buffer list is loaded with `lines=-50`, and in a quiet channel with churny join/quit
+     * traffic all fifty can be status lines — WeeChat has already filtered them (they arrive with
+     * displayed=false), but they still fill the window, leaving no real message to preview. The
+     * relay api has no way to ask for only displayed lines, so the only remedy is to look further
+     * back, and only for the buffers that actually need it.
+     *
+     * The responses land in the lines collector above, which picks the newest real message.
+     */
+    private fun requestPreviewBackfill(relayBuffers: List<com.weelay.app.relay.RelayBuffer>) {
+        for (buf in relayBuffers) {
+            if (buf.id == 0L || buf.id in previewBackfillRequested) continue
+            // Nothing fetched yet, or a usable preview already exists.
+            if (buf.lines.isEmpty()) continue
+            if (latestLinePerBuffer[buf.id] != null) continue
+            if (buf.lines.any { isRegularMessage(it) }) continue
+
+            // Once per buffer per session: if even the deeper window is all status lines, the
+            // channel really has had no messages and re-asking would just loop.
+            previewBackfillRequested += buf.id
+            relayClient.requestLines(buf.fullName, PREVIEW_BACKFILL_LINES)
+        }
     }
 
     private fun refreshBufferDisplay() {
@@ -141,11 +183,22 @@ class BufferListViewModel @Inject constructor(
         buildDisplayItems(currentBuffers)
     }
 
+    /** Mark a buffer read here and in WeeChat, without opening it. */
+    fun markRead(fullName: String) {
+        relayClient.markBufferRead(fullName)
+    }
+
+    /**
+     * Close a buffer in WeeChat. For an IRC channel that also parts it, which is why the UI asks
+     * first. The buffer list updates from the resulting buffer_closed event.
+     */
+    fun closeBuffer(fullName: String) {
+        relayClient.sendInput(fullName, "/buffer close")
+    }
+
     fun refreshFilter() {
         refreshBufferDisplay()
     }
-
-    private val highlightLines = mutableListOf<Pair<String, RelayLine>>() // bufferFullName to line
 
     fun loadHighlights() {
         // Scan all buffers' initial lines for highlights
@@ -158,7 +211,7 @@ class BufferListViewModel @Inject constructor(
             }
         }
         // Also include highlights collected from sync events
-        for ((bufFullName, line) in highlightLines) {
+        for ((bufFullName, line) in relayClient.highlightLines) {
             val buf = relayClient.buffers.value.find { it.fullName == bufFullName }
             val displayName = buf?.shortName ?: buf?.name ?: bufFullName.substringAfterLast(".")
             items.add(lineToHighlight(bufFullName, displayName, line))
@@ -196,4 +249,9 @@ class BufferListViewModel @Inject constructor(
     }
 
     private fun isRegularMessage(line: RelayLine): Boolean = MessageFormat.isRegularMessage(line)
+
+    private companion object {
+        /** How far back to look for a preview message in a buffer dominated by status lines. */
+        const val PREVIEW_BACKFILL_LINES = 500
+    }
 }

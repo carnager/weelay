@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -12,19 +13,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -47,7 +56,9 @@ fun MessageBubble(
     nick: String,
     nickColorValue: Color,
     searchQuery: String? = null,
-    isHighlighted: Boolean = false
+    isHighlighted: Boolean = false,
+    showLinkPreview: Boolean = true,
+    onLongPress: (() -> Unit)? = null
 ) {
     val largeRadius = 18.dp
     val smallRadius = 3.dp
@@ -68,57 +79,16 @@ fun MessageBubble(
         )
     }
 
-    // WhatsApp-like colors: green tint for own, light grey for others
-    val bubbleColor = if (isOwnMessage) {
-        Color(0xFF005C4B) // WhatsApp dark green
-    } else {
-        Color(0xFF1F2C34) // WhatsApp dark grey bubble
+    // Own messages and mentions get their own bubble colours, so a mention is findable while
+    // scrolling and not only through the buffer list badge.
+    val bubbleColor = when {
+        isOwnMessage -> Palette.ownBubble
+        message.isMention -> Palette.mentionBubble
+        else -> Palette.surface
     }
+    val mentionAccent = Palette.accent
 
-    val textColor = Color(0xFFE9EDEF) // Light text for dark bubbles
-    val timeColor = Color(0xFF8696A0) // Muted grey for timestamps
-    val linkColor = Color(0xFF53BDEB) // WhatsApp-style link blue
-
-    val uriHandler = LocalUriHandler.current
-
-    val searchHighlightColor = Color(0xFFFFD54F) // Yellow highlight for search matches
-
-    val annotatedText = remember(message.text, searchQuery) {
-        buildAnnotatedString {
-            val text = message.text
-            // Build a list of styled ranges: URLs and search matches
-            data class StyledRange(val start: Int, val end: Int, val type: String, val value: String)
-            val ranges = mutableListOf<StyledRange>()
-
-            // Find URLs
-            urlPattern.findAll(text).forEach { match ->
-                ranges.add(StyledRange(match.range.first, match.range.last + 1, "url", match.value))
-            }
-
-            // Process text character by character, applying URL and search styling
-            var lastIndex = 0
-            // Sort URL ranges
-            val urlRanges = ranges.sortedBy { it.start }
-
-            for (urlRange in urlRanges) {
-                // Text before URL - may contain search highlights
-                if (urlRange.start > lastIndex) {
-                    appendWithSearchHighlight(text.substring(lastIndex, urlRange.start), searchQuery, searchHighlightColor)
-                }
-                // URL
-                pushStringAnnotation(tag = "URL", annotation = urlRange.value)
-                withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
-                    append(urlRange.value)
-                }
-                pop()
-                lastIndex = urlRange.end
-            }
-            // Remaining text after last URL
-            if (lastIndex < text.length) {
-                appendWithSearchHighlight(text.substring(lastIndex), searchQuery, searchHighlightColor)
-            }
-        }
-    }
+    val annotatedText = rememberMessageText(message, nick, nickColorValue, searchQuery, leadingStar = true)
 
     Row(
         modifier = Modifier
@@ -136,8 +106,14 @@ fun MessageBubble(
             modifier = Modifier
                 .widthIn(min = 0.dp)
                 .then(
-                    if (isHighlighted) Modifier.border(1.5.dp, Color(0xFFFFD54F), bubbleShape)
-                    else Modifier
+                    // The jump-target outline (from the highlights sheet) is transient and wins;
+                    // the mention outline is a permanent property of the message.
+                    when {
+                        isHighlighted -> Modifier.border(1.5.dp, Palette.searchMatch, bubbleShape)
+                        message.isMention && !isOwnMessage ->
+                            Modifier.border(1.dp, mentionAccent, bubbleShape)
+                        else -> Modifier
+                    }
                 )
         ) {
             Column(
@@ -148,14 +124,14 @@ fun MessageBubble(
                     bottom = 5.dp
                 )
             ) {
-                if (isFirstInGroup) {
+                if (isFirstInGroup && !message.isAction) {
                     Text(
                         text = nick,
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = if (isOwnMessage) Color.White else nickColorValue,
+                        color = nickColorValue,
                         modifier = Modifier
                             .padding(bottom = 1.dp)
                             .then(
@@ -165,25 +141,20 @@ fun MessageBubble(
                     )
                 }
 
-                // Message text with inline time — WhatsApp style
+                // Message text with the time inline at its end
                 Row(
                     verticalAlignment = Alignment.Bottom,
                     modifier = Modifier.width(IntrinsicSize.Max)
                 ) {
-                    ClickableText(
+                    MessageText(
                         text = annotatedText,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 16.sp,
                             lineHeight = 22.sp,
-                            color = textColor
+                            color = Palette.onSurface
                         ),
-                        modifier = Modifier.weight(1f, fill = false),
-                        onClick = { offset ->
-                            annotatedText.getStringAnnotations(tag = "URL", start = offset, end = offset)
-                                .firstOrNull()?.let { annotation ->
-                                    uriHandler.openUri(annotation.item)
-                                }
-                        }
+                        onLongPress = onLongPress,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     Spacer(modifier = Modifier.width(6.dp))
@@ -193,23 +164,108 @@ fun MessageBubble(
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 11.sp
                         ),
-                        color = timeColor,
+                        color = Palette.muted,
                         textAlign = TextAlign.End,
                         modifier = Modifier.padding(bottom = 1.dp)
                     )
                 }
 
                 // Link preview for first URL in message
-                val firstUrl = remember(message.text) {
-                    urlPattern.find(message.text)?.value
-                }
-                firstUrl?.let { url ->
+                val previewUrl = remember(message.text) { firstUrl(message.text) }
+                if (showLinkPreview) previewUrl?.let { url ->
                     LinkPreviewCard(url = url, isOwnMessage = isOwnMessage)
                 }
             }
         }
     }
 }
+
+/**
+ * A message's text, styled: links underlined and tappable, search matches highlighted. An action
+ * is one sentence with the acting nick coloured inline; [leadingStar] prefixes it with "* " for
+ * layouts that have no separate column to show the star in.
+ */
+@Composable
+fun rememberMessageText(
+    message: DisplayMessage,
+    nick: String,
+    nickColor: Color,
+    searchQuery: String?,
+    leadingStar: Boolean
+): AnnotatedString = remember(message.text, searchQuery, message.isAction, nickColor, leadingStar) {
+    buildAnnotatedString {
+        if (message.isAction) {
+            if (leadingStar) {
+                withStyle(SpanStyle(color = nickColor, fontWeight = FontWeight.SemiBold)) { append("* ") }
+            }
+            val text = message.text
+            val nickEnd = if (text.startsWith(nick)) nick.length else 0
+            if (nickEnd > 0) {
+                withStyle(SpanStyle(color = nickColor, fontWeight = FontWeight.SemiBold)) {
+                    append(text.substring(0, nickEnd))
+                }
+            }
+            withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(text.substring(nickEnd)) }
+            return@buildAnnotatedString
+        }
+
+        val text = message.text
+        var lastIndex = 0
+        for (match in urlPattern.findAll(text)) {
+            if (match.range.first > lastIndex) {
+                appendWithSearchHighlight(text.substring(lastIndex, match.range.first), searchQuery, Palette.searchMatch)
+            }
+            pushStringAnnotation(tag = "URL", annotation = match.value)
+            withStyle(SpanStyle(color = Palette.link, textDecoration = TextDecoration.Underline)) {
+                append(match.value)
+            }
+            pop()
+            lastIndex = match.range.last + 1
+        }
+        if (lastIndex < text.length) {
+            appendWithSearchHighlight(text.substring(lastIndex), searchQuery, Palette.searchMatch)
+        }
+    }
+}
+
+/**
+ * Message text that opens a tapped link and reports a long press. A plain Text with its own
+ * gesture handling rather than ClickableText, which can't report a long press.
+ */
+@Composable
+fun MessageText(
+    text: AnnotatedString,
+    style: TextStyle,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    val uriHandler = LocalUriHandler.current
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // The caller passes a fresh lambda on every recomposition; read it through state so that
+    // doesn't restart the gesture detector each time.
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
+    Text(
+        text = text,
+        style = style,
+        onTextLayout = { textLayout = it },
+        modifier = modifier.pointerInput(text, onLongPress != null) {
+            detectTapGestures(
+                onTap = { position ->
+                    val offset = textLayout?.getOffsetForPosition(position) ?: return@detectTapGestures
+                    text.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()
+                        ?.let { uriHandler.openUri(it.item) }
+                },
+                onLongPress = if (onLongPress != null) {
+                    { currentOnLongPress?.invoke() }
+                } else null
+            )
+        }
+    )
+}
+
+/** The first link in a message, which gets the preview card. */
+fun firstUrl(text: String): String? = urlPattern.find(text)?.value
 
 private fun AnnotatedString.Builder.appendWithSearchHighlight(
     text: String,
