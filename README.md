@@ -2,27 +2,37 @@
 
 A modern Android client for [WeeChat](https://weechat.org/), built with Kotlin and Jetpack Compose.
 
-Weelay talks to WeeChat over the **`relay api` protocol** — the JSON/WebSocket relay introduced in WeeChat 4.0 — not the legacy binary `relay weechat` protocol. It aims to be a fast, clean, chat-app-feel front end: grouped message bubbles, link previews, in-buffer search, swipe-to-reply, nick actions, highlight collection, and unread badges.
+Weelay talks to WeeChat over the **`relay api` protocol** — the JSON/WebSocket relay introduced in WeeChat 4.0 — not the legacy binary `relay weechat` protocol. It keeps WeeChat's way of doing things (buffer numbers, the hotlist, nick colours, IRC-style lines) and adds what a phone needs: notifications, a read marker, swipe gestures and link previews.
 
 ## Screenshots
 
 <p align="center">
-  <img src="Screenshots/chat.png" width="30%" alt="Chat view with grouped message bubbles" />
-  <img src="Screenshots/user_actions.png" width="30%" alt="Nick actions and inline link previews" />
-  <img src="Screenshots/highlights.png" width="30%" alt="Per-buffer highlights" />
+  <img src="Screenshots/buffers_relay.png" width="30%" alt="Buffer list in the Relay style: buffer numbers, network sections and the activity strip" />
+  <img src="Screenshots/chat_lines.png" width="30%" alt="A channel in the Lines layout, with the new-messages marker and a mention" />
+  <img src="Screenshots/settings.png" width="30%" alt="Settings: connection, style and message layouts" />
+</p>
+<p align="center">
+  <img src="Screenshots/buffers_threads.png" width="30%" alt="Buffer list in the Threads style with the buffer filter" />
+  <img src="Screenshots/chat_grouped.png" width="30%" alt="A channel in the Grouped layout" />
+  <img src="Screenshots/chat_bubbles.png" width="30%" alt="A private chat in the Bubbles layout" />
 </p>
 
 ## Features
 
-- WeeChat `relay api` over WebSocket (`ws`/`wss`), token auth
-- Grouped, WhatsApp-style message bubbles with per-nick colors
-- Link detection, a per-buffer link list, and rich OpenGraph link previews
-- In-buffer search with match navigation
-- Swipe to reply, swipe for nick actions (query, whois, ban, kick, quiet)
-- Highlight collection (per-buffer and global)
-- Unread badges driven by WeeChat's own hotlist, with highlights badged separately; opening a
-  buffer marks it read in WeeChat so the desktop client stays in sync
-- Live connection-status banner
+- WeeChat `relay api` over WebSocket (`ws`/`wss`), password auth; self-signed relay
+  certificates can be trusted by fingerprint
+- Two styles, **Relay** (WeeChat-like, amber) and **Threads** (modern, periwinkle), and three
+  message layouts — **Lines**, **Grouped** and **Bubbles** — chosen separately for channels and
+  private chats
+- Buffer list with WeeChat's buffer numbers, sections per network, a hotlist-style activity strip
+  and (Threads) a jump-to-buffer filter
+- Unread counts straight from WeeChat's hotlist, highlights marked separately; opening a buffer
+  marks it read in WeeChat too, and a "new messages" divider shows where you left off
+- Link detection, a per-buffer link list, and OpenGraph link previews (can be switched off)
+- In-buffer search, channel topic, nicklist ranked by mode, input history
+- Swipe to reply, swipe or long-press for nick actions (query, info, kick, ban, quiet); long-press
+  a message to copy it, a buffer to mark it read or leave it
+- Share text and links from other apps into a buffer
 - Foreground service keeps the relay connected, reconnecting indefinitely with backoff and
   immediately when the device changes network
 - High-importance notifications for highlights and private messages, with conversation history,

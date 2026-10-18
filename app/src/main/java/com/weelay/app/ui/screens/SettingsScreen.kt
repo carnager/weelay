@@ -485,8 +485,8 @@ private fun StyleTile(
     ) {
         if (style == AppStyle.RELAY) {
             listOf(
-                Triple("12:01", "maze", Color(0xFFA1887F)),
-                Triple("12:02", "rasi", Color(0xFFF06292))
+                Triple("12:01", "arden", Color(0xFFA1887F)),
+                Triple("12:02", "wren", Color(0xFFF06292))
             ).forEach { (time, nick, color) ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(time, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = colors.muted)
@@ -495,7 +495,7 @@ private fun StyleTile(
                 }
             }
         } else {
-            listOf("Maze" to Color(0xFFA1887F), "Rasi" to Color(0xFFF06292)).forEach { (nick, color) ->
+            listOf("Arden" to Color(0xFFA1887F), "Wren" to Color(0xFFF06292)).forEach { (nick, color) ->
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(modifier = Modifier.size(14.dp).background(color.copy(alpha = 0.25f), RoundedCornerShape(4.dp)))
                     Text(nick, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = color)
