@@ -173,6 +173,19 @@ class BufferListViewModel @Inject constructor(
         buildDisplayItems(currentBuffers)
     }
 
+    /** Mark a buffer read here and in WeeChat, without opening it. */
+    fun markRead(fullName: String) {
+        relayClient.markBufferRead(fullName)
+    }
+
+    /**
+     * Close a buffer in WeeChat. For an IRC channel that also parts it, which is why the UI asks
+     * first. The buffer list updates from the resulting buffer_closed event.
+     */
+    fun closeBuffer(fullName: String) {
+        relayClient.sendInput(fullName, "/buffer close")
+    }
+
     fun refreshFilter() {
         refreshBufferDisplay()
     }

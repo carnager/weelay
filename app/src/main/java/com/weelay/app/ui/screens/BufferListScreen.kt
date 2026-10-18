@@ -1,7 +1,14 @@
 package com.weelay.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -66,6 +73,62 @@ fun BufferListScreen(
     val connectionState by viewModel.connectionState.collectAsState()
     val highlights by viewModel.highlights.collectAsState()
     var showHighlights by remember { mutableStateOf(false) }
+    var actionsFor by remember { mutableStateOf<BufferDisplayItem?>(null) }
+    var confirmClose by remember { mutableStateOf<BufferDisplayItem?>(null) }
+
+    actionsFor?.let { buffer ->
+        ModalBottomSheet(
+            onDismissRequest = { actionsFor = null },
+            sheetState = rememberModalBottomSheetState(),
+            containerColor = Color(0xFF1F2C34),
+            dragHandle = null
+        ) {
+            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                Text(
+                    buffer.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFFE9EDEF),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+                if (buffer.unreadCount > 0) {
+                    BufferActionRow(Icons.Default.DoneAll, "Mark as read", Color(0xFFE9EDEF)) {
+                        viewModel.markRead(buffer.fullName)
+                        actionsFor = null
+                    }
+                }
+                BufferActionRow(
+                    Icons.Default.Close,
+                    if (buffer.isChannel) "Leave and close" else "Close buffer",
+                    Color(0xFFE57373)
+                ) {
+                    confirmClose = buffer
+                    actionsFor = null
+                }
+            }
+        }
+    }
+
+    confirmClose?.let { buffer ->
+        AlertDialog(
+            onDismissRequest = { confirmClose = null },
+            containerColor = Color(0xFF1F2C34),
+            text = {
+                Text(
+                    if (buffer.isChannel) "Leave ${buffer.displayName} and close its buffer?"
+                    else "Close ${buffer.displayName}?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.closeBuffer(buffer.fullName)
+                    confirmClose = null
+                }) { Text(if (buffer.isChannel) "Leave" else "Close", color = Color(0xFFE57373)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClose = null }) { Text("Cancel") }
+            }
+        )
+    }
 
     if (showHighlights) {
         HighlightsSheet(
@@ -202,7 +265,8 @@ fun BufferListScreen(
                     items(buffers, key = { it.fullName }) { buffer ->
                         BufferListItem(
                             buffer = buffer,
-                            onClick = { onBufferClick(buffer.fullName) }
+                            onClick = { onBufferClick(buffer.fullName) },
+                            onLongClick = { actionsFor = buffer }
                         )
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 76.dp),
@@ -216,9 +280,31 @@ fun BufferListScreen(
 }
 
 @Composable
+private fun BufferActionRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+        Spacer(modifier = Modifier.width(16.dp))
+        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = tint)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun BufferListItem(
     buffer: BufferDisplayItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     val avatarColor = if (buffer.isChannel) {
         Color(0xFF00A884)
@@ -233,7 +319,7 @@ private fun BufferListItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
