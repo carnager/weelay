@@ -21,12 +21,12 @@ data class SettingsUiState(
     val port: String = "9001",
     val password: String = "",
     val useSsl: Boolean = false,
-    val hideSpecialBuffers: Boolean = false,
+    val hideSpecialBuffers: Boolean = true,
     val highlightWords: String = "",
     val linkPreviews: Boolean = true,
     val style: AppStyle = AppStyle.RELAY,
-    val channelLayout: MessageLayout = MessageLayout.LINES,
-    val privateLayout: MessageLayout = MessageLayout.BUBBLES
+    val channelLayout: MessageLayout = MessageLayout.GROUPED,
+    val privateLayout: MessageLayout = MessageLayout.GROUPED
 )
 
 @HiltViewModel

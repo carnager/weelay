@@ -108,17 +108,17 @@ class ConnectionPrefs @Inject constructor(application: Application) {
         }
 
     /**
-     * Message layout per kind of buffer. Busy channels read best as lines; one-to-one
-     * conversations suit bubbles; grouped sits between the two.
+     * Message layout per kind of buffer. Grouped is the default for both: dense enough for a busy
+     * channel, still easy to follow in a conversation. Lines and bubbles are the alternatives.
      */
     var channelLayout: MessageLayout
-        get() = enumPref(KEY_CHANNEL_LAYOUT, MessageLayout.LINES)
+        get() = enumPref(KEY_CHANNEL_LAYOUT, MessageLayout.GROUPED)
         set(value) {
             prefs.edit().putString(KEY_CHANNEL_LAYOUT, value.name).apply()
         }
 
     var privateLayout: MessageLayout
-        get() = enumPref(KEY_PRIVATE_LAYOUT, MessageLayout.BUBBLES)
+        get() = enumPref(KEY_PRIVATE_LAYOUT, MessageLayout.GROUPED)
         set(value) {
             prefs.edit().putString(KEY_PRIVATE_LAYOUT, value.name).apply()
         }
@@ -129,7 +129,7 @@ class ConnectionPrefs @Inject constructor(application: Application) {
             ?: default
 
     var hideSpecialBuffers: Boolean
-        get() = prefs.getBoolean(KEY_HIDE_SPECIAL, false)
+        get() = prefs.getBoolean(KEY_HIDE_SPECIAL, true)
         set(value) {
             prefs.edit().putBoolean(KEY_HIDE_SPECIAL, value).apply()
         }
