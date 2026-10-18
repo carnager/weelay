@@ -3,6 +3,7 @@ package com.weelay.app.viewmodel
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.relay.ConnectionState
 import com.weelay.app.data.MessageLayout
 import com.weelay.app.ui.theme.AppStyle
 import com.weelay.app.ui.theme.Palette
@@ -37,6 +38,15 @@ class SettingsViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+
+    val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
+
+    /** The installed version, for the About row. */
+    val appVersion: String = try {
+        application.packageManager.getPackageInfo(application.packageName, 0).versionName ?: ""
+    } catch (e: Exception) {
+        ""
+    }
 
     init {
         val saved = connectionPrefs.load()

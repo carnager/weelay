@@ -92,7 +92,11 @@ private val ThreadsColors = ColorSet(
  */
 object Palette {
     var style by mutableStateOf(AppStyle.RELAY)
-    private val c: ColorSet get() = if (style == AppStyle.THREADS) ThreadsColors else RelayColors
+    private val c: ColorSet get() = colorsFor(style)
+
+    /** A style's colours regardless of which is active, for previews of the other one. */
+    fun colorsFor(style: AppStyle): ColorSet =
+        if (style == AppStyle.THREADS) ThreadsColors else RelayColors
 
     val background get() = c.background
     val surface get() = c.surface
