@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon.png" width="128" alt="Weelay icon: an amber speech-bubble character with a periwinkle reply bubble" />
+</p>
+
 # Weelay
 
 A modern Android client for [WeeChat](https://weechat.org/), built with Kotlin and Jetpack Compose.

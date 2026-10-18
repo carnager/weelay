@@ -28,8 +28,8 @@ android {
         applicationId = "com.weelay.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
     }
 
     signingConfigs {
