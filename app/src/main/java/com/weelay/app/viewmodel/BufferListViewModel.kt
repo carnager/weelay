@@ -91,7 +91,11 @@ class BufferListViewModel @Inject constructor(
         viewModelScope.launch {
             relayClient.lines.collect { update ->
                 for (line in update.lines) {
-                    if (line.bufferId != 0L && isRegularMessage(line)) {
+                    if (line.bufferId == 0L || !isRegularMessage(line)) continue
+                    // Keep the newest: a history response can land after a live line that it
+                    // doesn't include, and must not roll the preview back. Ids rise within a buffer.
+                    val current = latestLinePerBuffer[line.bufferId]
+                    if (current == null || line.id >= current.id) {
                         latestLinePerBuffer[line.bufferId] = line
                     }
                 }

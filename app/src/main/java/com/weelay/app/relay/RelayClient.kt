@@ -644,12 +644,15 @@ class RelayClient @Inject constructor() {
                     }
                 }
                 "lines" -> {
+                    val request = obj["request"]?.jsonPrimitive?.content ?: ""
+                    val bufferName = extractBufferName(request)
+                    // Line objects carry no buffer_id of their own — the relay api only names the
+                    // buffer in the request path — so stamp it on here for every consumer.
+                    val bufferId = _buffers.value.find { it.fullName == bufferName }?.id ?: 0L
                     val lineList = json.decodeFromJsonElement(
                         kotlinx.serialization.builtins.ListSerializer(RelayLine.serializer()),
                         body!!
-                    )
-                    val request = obj["request"]?.jsonPrimitive?.content ?: ""
-                    val bufferName = extractBufferName(request)
+                    ).map { if (it.bufferId == 0L) it.copy(bufferId = bufferId) else it }
                     if (bufferName != null) {
                         // body_type "lines" is fetched backlog — never notify on these.
                         _lines.emit(LinesUpdate(bufferName, lineList, isHistory = true))
@@ -658,11 +661,15 @@ class RelayClient @Inject constructor() {
                     }
                 }
                 "line" -> {
-                    val line = json.decodeFromJsonElement(RelayLine.serializer(), body!!)
-                    // Sync events have buffer_id at top level
+                    // Sync events name the buffer at the top level, not in the line itself; copy
+                    // it onto the line so consumers can rely on RelayLine.bufferId.
                     val topBufferId = obj["buffer_id"]?.let {
                         try { it.jsonPrimitive.content.toBigDecimal().toLong() } catch (e: Exception) { null }
                     }
+                    val decoded = json.decodeFromJsonElement(RelayLine.serializer(), body!!)
+                    val line = if (decoded.bufferId == 0L && topBufferId != null) {
+                        decoded.copy(bufferId = topBufferId)
+                    } else decoded
                     val bid = if (line.bufferId != 0L) line.bufferId else topBufferId
                     val bufferName = _buffers.value.find { it.id == bid }?.fullName
                     if (bufferName == null) {

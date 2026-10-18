@@ -3,6 +3,8 @@ package com.weelay.app.relay
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
@@ -164,7 +166,7 @@ class RelayClientMessageTest {
         c.handleMessage(
             """
             {"code":200,"body_type":"lines","request":"GET /api/buffers/irc.libera.%23archlinux/lines",
-             "body":[{"id":1,"buffer_id":7,"prefix":"nick","message":"old","tags":["irc_privmsg"]}]}
+             "body":[{"id":1,"prefix":"nick","message":"old","tags":["irc_privmsg"]}]}
             """.trimIndent()
         )
 
@@ -181,7 +183,7 @@ class RelayClientMessageTest {
         c.handleMessage(
             """
             {"code":200,"body_type":"lines","request":"GET /api/buffers/irc.libera.%23archlinux/lines",
-             "body":[{"id":1,"buffer_id":7,"prefix":"nick","message":"old ping","tags":["irc_privmsg"],
+             "body":[{"id":1,"prefix":"nick","message":"old ping","tags":["irc_privmsg"],
                       "highlight":true}]}
             """.trimIndent()
         )
@@ -265,6 +267,29 @@ class RelayClientMessageTest {
         assertEquals(1, c.highlightLines.size)
     }
 
+    @Test
+    fun emittedLinesCarryTheirBufferId() = runTest {
+        // Real line objects have no buffer_id: a fetch names the buffer only in the request path
+        // and a sync event only at the top level. Consumers key previews by RelayLine.bufferId,
+        // so the client has to fill it in — without it the buffer list dropped every such line.
+        val c = client()
+        c.handleMessage(buffersFrame(7, "irc.libera.#archlinux"))
+        val received = async { c.lines.take(2).toList() }
+        yield()
+
+        c.handleMessage(
+            """
+            {"code":200,"body_type":"lines","request":"GET /api/buffers/irc.libera.%23archlinux/lines",
+             "body":[{"id":1,"prefix":"nick","message":"old","tags":["irc_privmsg"]}]}
+            """.trimIndent()
+        )
+        c.handleMessage(lineFrame(bufferId = 7, message = "new"))
+
+        val (history, live) = received.await()
+        assertEquals(7L, history.lines.single().bufferId)
+        assertEquals(7L, live.lines.single().bufferId)
+    }
+
     private fun lineFrame(
         bufferId: Long,
         message: String,
@@ -272,7 +297,7 @@ class RelayClientMessageTest {
         tags: String = """"irc_privmsg""""
     ) = """
         {"code":0,"message":"Event","event_name":"buffer_line_added","buffer_id":$bufferId,
-         "body_type":"line","body":{"id":${message.hashCode().toLong()},"buffer_id":$bufferId,
+         "body_type":"line","body":{"id":${message.hashCode().toLong()},
          "date":"2026-08-21T10:00:00.000Z","prefix":"someone","message":"$message",
          "tags":[$tags],"highlight":$highlight,"displayed":true}}
     """.trimIndent()
