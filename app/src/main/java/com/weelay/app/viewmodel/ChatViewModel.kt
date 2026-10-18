@@ -76,6 +76,10 @@ class ChatViewModel @Inject constructor(
     /** Read once per screen; flipping the setting takes effect the next time a buffer opens. */
     val linkPreviews: Boolean get() = connectionPrefs.linkPreviews
 
+    /** Whether this kind of buffer uses the compact line layout rather than bubbles. */
+    fun compactLayout(channel: Boolean): Boolean =
+        if (channel) connectionPrefs.compactChannels else connectionPrefs.compactPrivate
+
     /** What the user sent in this buffer, newest first; see [InputHistory]. */
     private val _sentHistory = MutableStateFlow<List<String>>(emptyList())
     val sentHistory: StateFlow<List<String>> = _sentHistory.asStateFlow()

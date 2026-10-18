@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -78,80 +79,16 @@ fun MessageBubble(
         )
     }
 
-    // WhatsApp-like colors: green tint for own, light grey for others. A message that mentioned
-    // the user gets a warmer bubble so it's findable while scrolling, not just via the buffer
-    // list badge.
+    // Own messages and mentions get their own bubble colours, so a mention is findable while
+    // scrolling and not only through the buffer list badge.
     val bubbleColor = when {
-        isOwnMessage -> Palette.ownBubble // WhatsApp dark green
-        message.isMention -> Palette.mentionBubble // amber-tinted dark for mentions
-        else -> Palette.surface // WhatsApp dark grey bubble
+        isOwnMessage -> Palette.ownBubble
+        message.isMention -> Palette.mentionBubble
+        else -> Palette.surface
     }
     val mentionAccent = Palette.accent
 
-    val textColor = Palette.onSurface // Light text for dark bubbles
-    val timeColor = Palette.muted // Muted grey for timestamps
-    val linkColor = Palette.link // WhatsApp-style link blue
-
-    val uriHandler = LocalUriHandler.current
-
-    val searchHighlightColor = Palette.searchMatch // Yellow highlight for search matches
-
-    val annotatedText = remember(message.text, searchQuery, message.isAction, nickColorValue) {
-        buildAnnotatedString {
-            // An action reads as one sentence — "* nick does something" — so it gets a leading
-            // star and the acting nick coloured inline, rather than a nick header above a bubble
-            // whose speaker would show as a bare "*".
-            if (message.isAction) {
-                withStyle(SpanStyle(color = nickColorValue, fontWeight = FontWeight.SemiBold)) {
-                    append("* ")
-                }
-                val text = message.text
-                val nickEnd = if (text.startsWith(nick)) nick.length else 0
-                if (nickEnd > 0) {
-                    withStyle(SpanStyle(color = nickColorValue, fontWeight = FontWeight.SemiBold)) {
-                        append(text.substring(0, nickEnd))
-                    }
-                }
-                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                    append(text.substring(nickEnd))
-                }
-                return@buildAnnotatedString
-            }
-
-            val text = message.text
-            // Build a list of styled ranges: URLs and search matches
-            data class StyledRange(val start: Int, val end: Int, val type: String, val value: String)
-            val ranges = mutableListOf<StyledRange>()
-
-            // Find URLs
-            urlPattern.findAll(text).forEach { match ->
-                ranges.add(StyledRange(match.range.first, match.range.last + 1, "url", match.value))
-            }
-
-            // Process text character by character, applying URL and search styling
-            var lastIndex = 0
-            // Sort URL ranges
-            val urlRanges = ranges.sortedBy { it.start }
-
-            for (urlRange in urlRanges) {
-                // Text before URL - may contain search highlights
-                if (urlRange.start > lastIndex) {
-                    appendWithSearchHighlight(text.substring(lastIndex, urlRange.start), searchQuery, searchHighlightColor)
-                }
-                // URL
-                pushStringAnnotation(tag = "URL", annotation = urlRange.value)
-                withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) {
-                    append(urlRange.value)
-                }
-                pop()
-                lastIndex = urlRange.end
-            }
-            // Remaining text after last URL
-            if (lastIndex < text.length) {
-                appendWithSearchHighlight(text.substring(lastIndex), searchQuery, searchHighlightColor)
-            }
-        }
-    }
+    val annotatedText = rememberMessageText(message, nick, nickColorValue, searchQuery, leadingStar = true)
 
     Row(
         modifier = Modifier
@@ -194,7 +131,7 @@ fun MessageBubble(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = if (isOwnMessage) Color.White else nickColorValue,
+                        color = nickColorValue,
                         modifier = Modifier
                             .padding(bottom = 1.dp)
                             .then(
@@ -204,42 +141,20 @@ fun MessageBubble(
                     )
                 }
 
-                // Message text with inline time — WhatsApp style
+                // Message text with the time inline at its end
                 Row(
                     verticalAlignment = Alignment.Bottom,
                     modifier = Modifier.width(IntrinsicSize.Max)
                 ) {
-                    // A plain Text with its own tap handling rather than ClickableText, which
-                    // can't report a long press.
-                    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-                    // The caller passes a fresh lambda on every recomposition; read it through
-                    // state so that doesn't restart the gesture detector each time.
-                    val currentOnLongPress by rememberUpdatedState(onLongPress)
-                    Text(
+                    MessageText(
                         text = annotatedText,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 16.sp,
                             lineHeight = 22.sp,
-                            color = textColor
+                            color = Palette.onSurface
                         ),
-                        onTextLayout = { textLayout = it },
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .pointerInput(annotatedText, onLongPress != null) {
-                                detectTapGestures(
-                                    onTap = { position ->
-                                        val offset = textLayout?.getOffsetForPosition(position)
-                                            ?: return@detectTapGestures
-                                        annotatedText
-                                            .getStringAnnotations(tag = "URL", start = offset, end = offset)
-                                            .firstOrNull()
-                                            ?.let { uriHandler.openUri(it.item) }
-                                    },
-                                    onLongPress = if (onLongPress != null) {
-                                        { currentOnLongPress?.invoke() }
-                                    } else null
-                                )
-                            }
+                        onLongPress = onLongPress,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
                     Spacer(modifier = Modifier.width(6.dp))
@@ -249,23 +164,108 @@ fun MessageBubble(
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 11.sp
                         ),
-                        color = timeColor,
+                        color = Palette.muted,
                         textAlign = TextAlign.End,
                         modifier = Modifier.padding(bottom = 1.dp)
                     )
                 }
 
                 // Link preview for first URL in message
-                val firstUrl = remember(message.text) {
-                    urlPattern.find(message.text)?.value
-                }
-                if (showLinkPreview) firstUrl?.let { url ->
+                val previewUrl = remember(message.text) { firstUrl(message.text) }
+                if (showLinkPreview) previewUrl?.let { url ->
                     LinkPreviewCard(url = url, isOwnMessage = isOwnMessage)
                 }
             }
         }
     }
 }
+
+/**
+ * A message's text, styled: links underlined and tappable, search matches highlighted. An action
+ * is one sentence with the acting nick coloured inline; [leadingStar] prefixes it with "* " for
+ * layouts that have no separate column to show the star in.
+ */
+@Composable
+fun rememberMessageText(
+    message: DisplayMessage,
+    nick: String,
+    nickColor: Color,
+    searchQuery: String?,
+    leadingStar: Boolean
+): AnnotatedString = remember(message.text, searchQuery, message.isAction, nickColor, leadingStar) {
+    buildAnnotatedString {
+        if (message.isAction) {
+            if (leadingStar) {
+                withStyle(SpanStyle(color = nickColor, fontWeight = FontWeight.SemiBold)) { append("* ") }
+            }
+            val text = message.text
+            val nickEnd = if (text.startsWith(nick)) nick.length else 0
+            if (nickEnd > 0) {
+                withStyle(SpanStyle(color = nickColor, fontWeight = FontWeight.SemiBold)) {
+                    append(text.substring(0, nickEnd))
+                }
+            }
+            withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(text.substring(nickEnd)) }
+            return@buildAnnotatedString
+        }
+
+        val text = message.text
+        var lastIndex = 0
+        for (match in urlPattern.findAll(text)) {
+            if (match.range.first > lastIndex) {
+                appendWithSearchHighlight(text.substring(lastIndex, match.range.first), searchQuery, Palette.searchMatch)
+            }
+            pushStringAnnotation(tag = "URL", annotation = match.value)
+            withStyle(SpanStyle(color = Palette.link, textDecoration = TextDecoration.Underline)) {
+                append(match.value)
+            }
+            pop()
+            lastIndex = match.range.last + 1
+        }
+        if (lastIndex < text.length) {
+            appendWithSearchHighlight(text.substring(lastIndex), searchQuery, Palette.searchMatch)
+        }
+    }
+}
+
+/**
+ * Message text that opens a tapped link and reports a long press. A plain Text with its own
+ * gesture handling rather than ClickableText, which can't report a long press.
+ */
+@Composable
+fun MessageText(
+    text: AnnotatedString,
+    style: TextStyle,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    val uriHandler = LocalUriHandler.current
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // The caller passes a fresh lambda on every recomposition; read it through state so that
+    // doesn't restart the gesture detector each time.
+    val currentOnLongPress by rememberUpdatedState(onLongPress)
+    Text(
+        text = text,
+        style = style,
+        onTextLayout = { textLayout = it },
+        modifier = modifier.pointerInput(text, onLongPress != null) {
+            detectTapGestures(
+                onTap = { position ->
+                    val offset = textLayout?.getOffsetForPosition(position) ?: return@detectTapGestures
+                    text.getStringAnnotations(tag = "URL", start = offset, end = offset)
+                        .firstOrNull()
+                        ?.let { uriHandler.openUri(it.item) }
+                },
+                onLongPress = if (onLongPress != null) {
+                    { currentOnLongPress?.invoke() }
+                } else null
+            )
+        }
+    )
+}
+
+/** The first link in a message, which gets the preview card. */
+fun firstUrl(text: String): String? = urlPattern.find(text)?.value
 
 private fun AnnotatedString.Builder.appendWithSearchHighlight(
     text: String,

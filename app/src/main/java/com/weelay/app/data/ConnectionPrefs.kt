@@ -89,6 +89,22 @@ class ConnectionPrefs @Inject constructor(application: Application) {
             prefs.edit().putString(KEY_PINNED_CERT, value).apply()
         }
 
+    /**
+     * Message layout per kind of buffer: compact IRC lines (true) or chat bubbles (false). Busy
+     * channels read better as lines; one-to-one conversations suit bubbles.
+     */
+    var compactChannels: Boolean
+        get() = prefs.getBoolean(KEY_COMPACT_CHANNELS, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_COMPACT_CHANNELS, value).apply()
+        }
+
+    var compactPrivate: Boolean
+        get() = prefs.getBoolean(KEY_COMPACT_PRIVATE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_COMPACT_PRIVATE, value).apply()
+        }
+
     var hideSpecialBuffers: Boolean
         get() = prefs.getBoolean(KEY_HIDE_SPECIAL, false)
         set(value) {
@@ -105,5 +121,7 @@ class ConnectionPrefs @Inject constructor(application: Application) {
         private const val KEY_HIGHLIGHT_WORDS = "highlight_words"
         private const val KEY_LINK_PREVIEWS = "link_previews"
         private const val KEY_PINNED_CERT = "pinned_cert_sha256"
+        private const val KEY_COMPACT_CHANNELS = "compact_channels"
+        private const val KEY_COMPACT_PRIVATE = "compact_private"
     }
 }

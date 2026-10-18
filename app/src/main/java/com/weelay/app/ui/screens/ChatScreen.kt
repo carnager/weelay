@@ -114,6 +114,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.ui.components.HighlightsSheet
+import com.weelay.app.ui.components.CompactMessageRow
 import com.weelay.app.ui.components.MessageBubble
 import com.weelay.app.ui.components.NickActionSheet
 import com.weelay.app.ui.theme.nickColor
@@ -148,6 +149,7 @@ fun ChatScreen(
     val bufferTitle by viewModel.bufferTitle.collectAsState()
     val isChannel by viewModel.isChannel.collectAsState()
     val showLinkPreviews = remember { viewModel.linkPreviews }
+    val compact = remember(isChannel) { viewModel.compactLayout(isChannel) }
     var showTopic by remember { mutableStateOf(false) }
     var messageMenuFor by remember { mutableStateOf<Pair<MessageGroup, DisplayMessage>?>(null) }
     // A kick or ban waiting for confirmation: the command to send, and a description of it.
@@ -838,27 +840,44 @@ fun ChatScreen(
                                         selectedNick = group.nick
                                     }
                                 ) {
-                                    MessageBubble(
-                                        message = message,
-                                        isFirstInGroup = message == group.messages.first(),
-                                        isLastInGroup = message == group.messages.last(),
-                                        isOwnMessage = group.isOwnMessage,
-                                        onNickClick = { nick ->
+                                    val insertNick: (String) -> Unit = { nick ->
                                         val text = inputText.text
                                         val suffix = if (text.isEmpty()) "$nick: " else "$nick "
                                         val newText = text + suffix
                                         inputText = TextFieldValue(newText, TextRange(newText.length))
-                                    },
-                                        nick = group.nick,
-                                        nickColorValue = group.nickColor,
-                                        searchQuery = if (showSearch && searchQuery.length >= 2) searchQuery else null,
-                                        isHighlighted = message.id == highlightedMessageId,
-                                        showLinkPreview = showLinkPreviews,
-                                        onLongPress = {
-                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            messageMenuFor = group to message
-                                        }
-                                    )
+                                    }
+                                    val openMenu = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        messageMenuFor = group to message
+                                    }
+                                    val query = if (showSearch && searchQuery.length >= 2) searchQuery else null
+                                    if (compact) {
+                                        CompactMessageRow(
+                                            message = message,
+                                            nick = group.nick,
+                                            nickColor = group.nickColor,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onNickClick = insertNick,
+                                            onLongPress = openMenu
+                                        )
+                                    } else {
+                                        MessageBubble(
+                                            message = message,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            isLastInGroup = message == group.messages.last(),
+                                            isOwnMessage = group.isOwnMessage,
+                                            onNickClick = insertNick,
+                                            nick = group.nick,
+                                            nickColorValue = group.nickColor,
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onLongPress = openMenu
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1233,21 +1252,23 @@ private fun NewMessagesDivider() {
 
 @Composable
 private fun TimestampSeparator(timestamp: String) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        contentAlignment = Alignment.Center
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.divider)
         Text(
             text = timestamp,
             style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.sp
+                fontSize = 11.sp,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
             ),
             color = Palette.muted,
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 8.dp)
         )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.divider)
     }
 }
 

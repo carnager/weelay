@@ -27,6 +27,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -217,6 +220,17 @@ fun SettingsScreen(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
+            LayoutChoiceRow(
+                title = "Channels",
+                compact = uiState.compactChannels,
+                onChange = viewModel::onCompactChannelsChange
+            )
+            LayoutChoiceRow(
+                title = "Private chats",
+                compact = uiState.compactPrivate,
+                onChange = viewModel::onCompactPrivateChange
+            )
+
             SettingsSwitchRow(
                 title = "Hide special buffers",
                 summary = "Hide server and special buffers from the buffer list",
@@ -277,6 +291,43 @@ fun SettingsScreen(
             )
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+    }
+}
+
+/** Choose between compact IRC lines and chat bubbles for one kind of buffer. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LayoutChoiceRow(title: String, compact: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = Palette.onSurface,
+            modifier = Modifier.weight(1f)
+        )
+        SingleChoiceSegmentedButtonRow {
+            listOf(true to "Lines", false to "Bubbles").forEachIndexed { index, (value, label) ->
+                SegmentedButton(
+                    selected = compact == value,
+                    onClick = { onChange(value) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = Palette.accent,
+                        activeContentColor = Palette.onAccent,
+                        inactiveContainerColor = Palette.background,
+                        inactiveContentColor = Palette.onSurface,
+                        activeBorderColor = Palette.accent,
+                        inactiveBorderColor = Palette.divider
+                    ),
+                    icon = {}
+                ) { Text(label) }
+            }
         }
     }
 }

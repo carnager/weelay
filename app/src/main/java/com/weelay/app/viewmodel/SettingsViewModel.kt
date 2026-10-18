@@ -19,7 +19,9 @@ data class SettingsUiState(
     val useSsl: Boolean = false,
     val hideSpecialBuffers: Boolean = false,
     val highlightWords: String = "",
-    val linkPreviews: Boolean = true
+    val linkPreviews: Boolean = true,
+    val compactChannels: Boolean = true,
+    val compactPrivate: Boolean = false
 )
 
 @HiltViewModel
@@ -41,7 +43,9 @@ class SettingsViewModel @Inject constructor(
             useSsl = saved.useSsl,
             hideSpecialBuffers = connectionPrefs.hideSpecialBuffers,
             highlightWords = connectionPrefs.highlightWords,
-            linkPreviews = connectionPrefs.linkPreviews
+            linkPreviews = connectionPrefs.linkPreviews,
+            compactChannels = connectionPrefs.compactChannels,
+            compactPrivate = connectionPrefs.compactPrivate
         )
     }
 
@@ -79,6 +83,16 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(highlightWords = words) }
         // Persisted immediately; ChatViewModel rebuilds its matchers on the next buffer load.
         connectionPrefs.highlightWords = words
+    }
+
+    fun onCompactChannelsChange(compact: Boolean) {
+        _uiState.update { it.copy(compactChannels = compact) }
+        connectionPrefs.compactChannels = compact
+    }
+
+    fun onCompactPrivateChange(compact: Boolean) {
+        _uiState.update { it.copy(compactPrivate = compact) }
+        connectionPrefs.compactPrivate = compact
     }
 
     fun onLinkPreviewsChange(enabled: Boolean) {

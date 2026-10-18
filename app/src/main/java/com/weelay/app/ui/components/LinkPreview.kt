@@ -1,6 +1,7 @@
 package com.weelay.app.ui.components
 
 import com.weelay.app.ui.theme.Palette
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -21,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -225,7 +227,9 @@ private fun decodeHtmlEntities(text: String): String {
 @Composable
 fun LinkPreviewCard(
     url: String,
-    isOwnMessage: Boolean
+    isOwnMessage: Boolean,
+    /** One-line card without the image or description, for the compact message layout. */
+    compact: Boolean = false
 ) {
     var preview by remember(url) { mutableStateOf<LinkPreviewData?>(null) }
     var loaded by remember(url) { mutableStateOf(false) }
@@ -239,6 +243,44 @@ fun LinkPreviewCard(
     if (!loaded || preview == null) return
 
     val data = preview!!
+    val domain = try { URL(url).host.removePrefix("www.") } catch (e: Exception) { url }
+
+    if (compact) {
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = Palette.surface,
+            border = BorderStroke(1.dp, Palette.divider),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
+                .clickable { uriHandler.openUri(url) }
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                Text(
+                    text = domain,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    color = Palette.muted,
+                    maxLines = 1
+                )
+                data.title?.let { title ->
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = Palette.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        return
+    }
     val cardColor = if (isOwnMessage) Palette.ownPreviewCard else Palette.previewCard
 
     Surface(
