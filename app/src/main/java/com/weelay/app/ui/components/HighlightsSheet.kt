@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,7 +41,7 @@ fun HighlightsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        containerColor = Color(0xFF1F2C34)
+        containerColor = Palette.surface
     ) {
         Column(modifier = Modifier.padding(bottom = 32.dp)) {
             Text(
@@ -49,10 +50,10 @@ fun HighlightsSheet(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFFE9EDEF),
+                color = Palette.onSurface,
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
             )
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             if (highlights.isEmpty()) {
                 Box(
@@ -64,7 +65,7 @@ fun HighlightsSheet(
                     Text(
                         text = "No highlights",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color(0xFF8696A0)
+                        color = Palette.muted
                     )
                 }
             } else {
@@ -84,13 +85,13 @@ fun HighlightsSheet(
                                     Text(
                                         text = item.channel,
                                         style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                                        color = Color(0xFF00A884)
+                                        color = Palette.accent
                                     )
                                 }
                                 Text(
                                     text = item.time,
                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                                    color = Color(0xFF8696A0)
+                                    color = Palette.muted
                                 )
                             }
                             if (item.nick.isNotEmpty()) {
@@ -107,7 +108,7 @@ fun HighlightsSheet(
                             Text(
                                 text = item.message,
                                 style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                                color = Color(0xFFE9EDEF),
+                                color = Palette.onSurface,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.padding(top = 2.dp)
@@ -115,7 +116,7 @@ fun HighlightsSheet(
                         }
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 20.dp),
-                            color = Color(0xFF233039)
+                            color = Palette.divider
                         )
                     }
                 }

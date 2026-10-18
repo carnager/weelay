@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import com.weelay.app.ui.theme.Palette
 import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -184,7 +185,7 @@ fun ChatScreen(
     val haptic = LocalHapticFeedback.current
     var replyToNick by remember { mutableStateOf<String?>(null) }
     var replyToMessage by remember { mutableStateOf<String?>(null) }
-    var replyToColor by remember { mutableStateOf(Color(0xFF00A884)) }
+    var replyToColor by remember { mutableStateOf(Palette.accent) }
     var justSentMessage by remember { mutableStateOf(false) }
     var oldestMessageId by remember { mutableStateOf<Long?>(null) }
 
@@ -403,12 +404,12 @@ fun ChatScreen(
                 TextButton(onClick = {
                     viewModel.sendMessage(command)
                     pendingModAction = null
-                }) { Text(if (command.startsWith("/ban")) "Ban" else "Kick", color = Color(0xFFE57373)) }
+                }) { Text(if (command.startsWith("/ban")) "Ban" else "Kick", color = Palette.danger) }
             },
             dismissButton = {
                 TextButton(onClick = { pendingModAction = null }) { Text("Cancel") }
             },
-            containerColor = Color(0xFF1F2C34)
+            containerColor = Palette.surface
         )
     }
 
@@ -431,7 +432,7 @@ fun ChatScreen(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFF53BDEB),
+                            color = Palette.link,
                             textDecoration = TextDecoration.Underline,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -446,7 +447,7 @@ fun ChatScreen(
             confirmButton = {
                 TextButton(onClick = { showTopic = false }) { Text("Close") }
             },
-            containerColor = Color(0xFF1F2C34)
+            containerColor = Palette.surface
         )
     }
 
@@ -559,21 +560,21 @@ fun ChatScreen(
                                     highlightedMessageId = null
                                 }
                             },
-                            placeholder = { Text("Search...", color = Color(0xFF8696A0)) },
+                            placeholder = { Text("Search...", color = Palette.muted) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(inputFocusRequester),
                             singleLine = true,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
                                 fontSize = 15.sp,
-                                color = Color(0xFFE9EDEF)
+                                color = Palette.onSurface
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
                                 focusedBorderColor = Color.Transparent,
                                 unfocusedBorderColor = Color.Transparent,
-                                cursorColor = Color(0xFF00A884)
+                                cursorColor = Palette.accent
                             )
                         )
                     },
@@ -589,7 +590,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Close search",
-                                tint = Color(0xFFE9EDEF)
+                                tint = Palette.onSurface
                             )
                         }
                     },
@@ -597,7 +598,7 @@ fun ChatScreen(
                         if (searchResults.isNotEmpty()) {
                             Text(
                                 text = "${currentSearchIndex + 1}/${searchResults.size}",
-                                color = Color(0xFF8696A0),
+                                color = Palette.muted,
                                 style = MaterialTheme.typography.labelSmall,
                                 modifier = Modifier.padding(end = 4.dp)
                             )
@@ -618,7 +619,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Previous",
-                                tint = if (currentSearchIndex > 0) Color(0xFFE9EDEF) else Color(0xFF8696A0),
+                                tint = if (currentSearchIndex > 0) Palette.onSurface else Palette.muted,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .graphicsLayer { rotationZ = 180f }
@@ -640,13 +641,13 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.KeyboardArrowDown,
                                 contentDescription = "Next",
-                                tint = if (currentSearchIndex < searchResults.size - 1) Color(0xFFE9EDEF) else Color(0xFF8696A0),
+                                tint = if (currentSearchIndex < searchResults.size - 1) Palette.onSurface else Palette.muted,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color(0xFF1F2C34)
+                        containerColor = Palette.surface
                     )
                 )
             } else {
@@ -669,7 +670,7 @@ fun ChatScreen(
                                 Text(
                                     text = bufferTitle,
                                     style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                                    color = Color(0xFF8696A0),
+                                    color = Palette.muted,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -692,14 +693,14 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.Notifications,
                                 contentDescription = "Highlights",
-                                tint = Color(0xFF8696A0)
+                                tint = Palette.muted
                             )
                         }
                         IconButton(onClick = { showSearch = true }) {
                             Icon(
                                 imageVector = Icons.Default.Search,
                                 contentDescription = "Search",
-                                tint = Color(0xFF8696A0)
+                                tint = Palette.muted
                             )
                         }
                         if (urls.isNotEmpty()) {
@@ -707,7 +708,7 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.Link,
                                     contentDescription = "URLs",
-                                    tint = Color(0xFF8696A0)
+                                    tint = Palette.muted
                                 )
                             }
                         }
@@ -716,18 +717,18 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.Group,
                                     contentDescription = "Nicklist",
-                                    tint = Color(0xFF8696A0)
+                                    tint = Palette.muted
                                 )
                             }
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color(0xFF1F2C34)
+                        containerColor = Palette.surface
                     )
                 )
             }
         },
-        containerColor = Color(0xFF0B141A)
+        containerColor = Palette.background
     ) { padding ->
         Column(
             modifier = Modifier
@@ -747,8 +748,8 @@ fun ChatScreen(
                 }
                 val bannerColor = when (connectionState) {
                     // Amber: in progress, not yet a failure — green read as "all good".
-                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Color(0xFF8D6E00)
-                    else -> Color(0xFFB71C1C)
+                    ConnectionState.RECONNECTING, ConnectionState.CONNECTING -> Palette.bannerProgress
+                    else -> Palette.bannerError
                 }
                 Box(
                     modifier = Modifier
@@ -804,9 +805,9 @@ fun ChatScreen(
                                 },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = if (hasMoreHistory) {
-                                    Color(0xFF53BDEB)
+                                    Palette.link
                                 } else {
-                                    Color(0xFF8696A0)
+                                    Palette.muted
                                 }
                             )
                         }
@@ -884,8 +885,8 @@ fun ChatScreen(
                         },
                         modifier = Modifier.size(40.dp),
                         shape = CircleShape,
-                        containerColor = Color(0xFF1F2C34),
-                        contentColor = Color(0xFF8696A0),
+                        containerColor = Palette.surface,
+                        contentColor = Palette.muted,
                         elevation = FloatingActionButtonDefaults.elevation(
                             defaultElevation = 4.dp
                         )
@@ -939,7 +940,7 @@ fun ChatScreen(
                         Text(
                             text = replyToMessage ?: "",
                             style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
-                            color = Color(0xFF8696A0),
+                            color = Palette.muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -954,7 +955,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cancel reply",
-                            tint = Color(0xFF8696A0),
+                            tint = Palette.muted,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -994,7 +995,7 @@ fun ChatScreen(
                                     val newText = "$prefix$nick$suffix"
                                     inputText = TextFieldValue(newText, TextRange(newText.length))
                                 }
-                                .background(Color(0xFF1F2C34), MaterialTheme.shapes.small)
+                                .background(Palette.surface, MaterialTheme.shapes.small)
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
@@ -1022,7 +1023,7 @@ fun ChatScreen(
                         inputText = it
                     },
                     placeholder = {
-                        Text("Message", color = Color(0xFF8696A0))
+                        Text("Message", color = Palette.muted)
                     },
                     trailingIcon = if (inputText.text.isEmpty() && sentHistory.isNotEmpty()) {
                         {
@@ -1031,14 +1032,14 @@ fun ChatScreen(
                                     Icon(
                                         imageVector = Icons.Default.History,
                                         contentDescription = "Sent messages",
-                                        tint = Color(0xFF8696A0)
+                                        tint = Palette.muted
                                     )
                                 }
                                 DropdownMenu(
                                     expanded = showHistoryMenu,
                                     onDismissRequest = { showHistoryMenu = false },
                                     modifier = Modifier
-                                        .background(Color(0xFF1F2C34))
+                                        .background(Palette.surface)
                                         .widthIn(max = 320.dp)
                                 ) {
                                     sentHistory.take(15).forEach { entry ->
@@ -1046,7 +1047,7 @@ fun ChatScreen(
                                             text = {
                                                 Text(
                                                     entry,
-                                                    color = Color(0xFFE9EDEF),
+                                                    color = Palette.onSurface,
                                                     maxLines = 2,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
@@ -1092,13 +1093,13 @@ fun ChatScreen(
                     singleLine = false,
                     maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = Color(0xFF1F2C34),
-                        unfocusedContainerColor = Color(0xFF1F2C34),
+                        focusedContainerColor = Palette.surface,
+                        unfocusedContainerColor = Palette.surface,
                         focusedBorderColor = Color.Transparent,
                         unfocusedBorderColor = Color.Transparent,
-                        focusedTextColor = Color(0xFFE9EDEF),
-                        unfocusedTextColor = Color(0xFFE9EDEF),
-                        cursorColor = Color(0xFF00A884)
+                        focusedTextColor = Palette.onSurface,
+                        unfocusedTextColor = Palette.onSurface,
+                        cursorColor = Palette.accent
                     )
                 )
 
@@ -1130,7 +1131,7 @@ fun ChatScreen(
                         .padding(start = 4.dp)
                         .size(48.dp),
                     shape = CircleShape,
-                    containerColor = Color(0xFF00A884),
+                    containerColor = Palette.accent,
                     elevation = FloatingActionButtonDefaults.elevation(
                         defaultElevation = 2.dp
                     )
@@ -1138,7 +1139,7 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = Color(0xFF0B141A),
+                        tint = Palette.onAccent,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -1158,7 +1159,7 @@ private fun MessageActionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
@@ -1184,9 +1185,9 @@ private fun MessageActionRow(
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(icon, contentDescription = null, tint = Color(0xFFE9EDEF), modifier = Modifier.size(24.dp))
+        Icon(icon, contentDescription = null, tint = Palette.onSurface, modifier = Modifier.size(24.dp))
         Spacer(modifier = Modifier.width(16.dp))
-        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Color(0xFFE9EDEF))
+        Text(label, style = MaterialTheme.typography.bodyLarge.copy(fontSize = 16.sp), color = Palette.onSurface)
     }
 }
 
@@ -1219,14 +1220,14 @@ private fun NewMessagesDivider() {
             .padding(top = 10.dp, bottom = 2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF00A884))
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.accent)
         Text(
             text = "New messages",
             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-            color = Color(0xFF00A884),
+            color = Palette.accent,
             modifier = Modifier.padding(horizontal = 8.dp)
         )
-        HorizontalDivider(modifier = Modifier.weight(1f), color = Color(0xFF00A884))
+        HorizontalDivider(modifier = Modifier.weight(1f), color = Palette.accent)
     }
 }
 
@@ -1243,7 +1244,7 @@ private fun TimestampSeparator(timestamp: String) {
             style = MaterialTheme.typography.labelSmall.copy(
                 fontSize = 11.sp
             ),
-            color = Color(0xFF8696A0),
+            color = Palette.muted,
             modifier = Modifier
                 .padding(horizontal = 12.dp, vertical = 4.dp)
         )
@@ -1260,7 +1261,7 @@ private fun NicklistSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(
@@ -1274,11 +1275,11 @@ private fun NicklistSheet(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFFE9EDEF),
+                color = Palette.onSurface,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
             )
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             LazyColumn(
                 modifier = Modifier.height(400.dp)
@@ -1312,14 +1313,14 @@ private fun NicklistSheet(
                                 '~', '&', '@' -> Color(0xFF81C784)
                                 '%' -> Color(0xFFFFB74D)
                                 '+' -> Color(0xFFFFF176)
-                                else -> Color(0xFF8696A0)
+                                else -> Palette.muted
                             },
                             modifier = Modifier.width(14.dp)
                         )
                         Text(
                             text = nick,
                             style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
-                            color = Color(0xFFE9EDEF)
+                            color = Palette.onSurface
                         )
                     }
                 }
@@ -1339,7 +1340,7 @@ private fun UrlListSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(),
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(
@@ -1353,11 +1354,11 @@ private fun UrlListSheet(
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFFE9EDEF),
+                color = Palette.onSurface,
                 modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
             )
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             LazyColumn(
                 modifier = Modifier.height(400.dp)
@@ -1372,20 +1373,20 @@ private fun UrlListSheet(
                         Text(
                             text = url,
                             style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
-                            color = Color(0xFF53BDEB),
+                            color = Palette.link,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "by $nick",
                             style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                            color = Color(0xFF8696A0),
+                            color = Palette.muted,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
                     HorizontalDivider(
                         modifier = Modifier.padding(horizontal = 20.dp),
-                        color = Color(0xFF233039)
+                        color = Palette.divider
                     )
                 }
             }
@@ -1468,7 +1469,7 @@ private fun SwipeableMessage(
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.Reply,
                     contentDescription = "Reply",
-                    tint = Color(0xFF00A884).copy(
+                    tint = Palette.accent.copy(
                         alpha = (animatedOffset / threshold).coerceIn(0f, 1f)
                     ),
                     modifier = Modifier.size(22.dp)
@@ -1488,7 +1489,7 @@ private fun SwipeableMessage(
                 Icon(
                     imageVector = Icons.Default.Person,
                     contentDescription = "Nick actions",
-                    tint = Color(0xFF00A884).copy(
+                    tint = Palette.accent.copy(
                         alpha = ((-animatedOffset) / threshold).coerceIn(0f, 1f)
                     ),
                     modifier = Modifier.size(22.dp)

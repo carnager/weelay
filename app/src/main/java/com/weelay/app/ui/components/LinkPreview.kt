@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
@@ -238,7 +239,7 @@ fun LinkPreviewCard(
     if (!loaded || preview == null) return
 
     val data = preview!!
-    val cardColor = if (isOwnMessage) Color(0xFF004A3D) else Color(0xFF182229)
+    val cardColor = if (isOwnMessage) Palette.ownPreviewCard else Palette.previewCard
 
     Surface(
         shape = RoundedCornerShape(8.dp),
@@ -270,7 +271,7 @@ fun LinkPreviewCard(
                         URL(url).host.removePrefix("www.")
                     } catch (e: Exception) { url },
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = Color(0xFF8696A0),
+                    color = Palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -282,7 +283,7 @@ fun LinkPreviewCard(
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         ),
-                        color = Color(0xFFE9EDEF),
+                        color = Palette.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)
@@ -293,7 +294,7 @@ fun LinkPreviewCard(
                     Text(
                         text = desc,
                         style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                        color = Color(0xFF8696A0),
+                        color = Palette.muted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(top = 2.dp)

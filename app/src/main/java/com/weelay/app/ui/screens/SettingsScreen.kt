@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -68,7 +69,7 @@ fun SettingsScreen(
                     Text(
                         "Settings",
                         style = MaterialTheme.typography.titleMedium.copy(fontSize = 18.sp),
-                        color = Color(0xFFE9EDEF)
+                        color = Palette.onSurface
                     )
                 },
                 navigationIcon = {
@@ -76,16 +77,16 @@ fun SettingsScreen(
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back",
-                            tint = Color(0xFFE9EDEF)
+                            tint = Palette.onSurface
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1F2C34)
+                    containerColor = Palette.surface
                 )
             )
         },
-        containerColor = Color(0xFF0B141A)
+        containerColor = Palette.background
     ) { padding ->
         Column(
             modifier = Modifier
@@ -103,20 +104,20 @@ fun SettingsScreen(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFF00A884),
+                color = Palette.accent,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
             val textFieldColors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFF1F2C34),
-                unfocusedContainerColor = Color(0xFF1F2C34),
-                focusedBorderColor = Color(0xFF00A884),
-                unfocusedBorderColor = Color(0xFF233039),
-                focusedTextColor = Color(0xFFE9EDEF),
-                unfocusedTextColor = Color(0xFFE9EDEF),
-                focusedLabelColor = Color(0xFF00A884),
-                unfocusedLabelColor = Color(0xFF8696A0),
-                cursorColor = Color(0xFF00A884)
+                focusedContainerColor = Palette.surface,
+                unfocusedContainerColor = Palette.surface,
+                focusedBorderColor = Palette.accent,
+                unfocusedBorderColor = Palette.divider,
+                focusedTextColor = Palette.onSurface,
+                unfocusedTextColor = Palette.onSurface,
+                focusedLabelColor = Palette.accent,
+                unfocusedLabelColor = Palette.muted,
+                cursorColor = Palette.accent
             )
 
             OutlinedTextField(
@@ -157,7 +158,7 @@ fun SettingsScreen(
                             imageVector = if (passwordVisible)
                                 Icons.Default.VisibilityOff else Icons.Default.Visibility,
                             contentDescription = "Toggle password visibility",
-                            tint = Color(0xFF8696A0)
+                            tint = Palette.muted
                         )
                     }
                 },
@@ -175,15 +176,15 @@ fun SettingsScreen(
                     checked = uiState.useSsl,
                     onCheckedChange = viewModel::onSslChange,
                     colors = CheckboxDefaults.colors(
-                        checkedColor = Color(0xFF00A884),
-                        uncheckedColor = Color(0xFF8696A0)
+                        checkedColor = Palette.accent,
+                        uncheckedColor = Palette.muted
                     )
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     "Use SSL/TLS",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFE9EDEF)
+                    color = Palette.onSurface
                 )
             }
 
@@ -193,15 +194,15 @@ fun SettingsScreen(
                 onClick = viewModel::saveAndReconnect,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF00A884)
+                    containerColor = Palette.accent
                 )
             ) {
-                Text("Save & Reconnect", color = Color(0xFF0B141A))
+                Text("Save & Reconnect", color = Palette.onAccent)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -212,7 +213,7 @@ fun SettingsScreen(
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold
                 ),
-                color = Color(0xFF00A884),
+                color = Palette.accent,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
@@ -251,7 +252,7 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -261,8 +262,8 @@ fun SettingsScreen(
                     onDisconnected()
                 },
                 modifier = Modifier.fillMaxWidth(),
-                border = BorderStroke(1.dp, Color(0xFFE57373)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE57373))
+                border = BorderStroke(1.dp, Palette.danger),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.danger)
             ) {
                 Text("Disconnect")
             }
@@ -271,7 +272,7 @@ fun SettingsScreen(
                 "Closes the relay connection and stops the background service. " +
                     "Weelay won't reconnect until you connect again.",
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF8696A0),
+                color = Palette.muted,
                 modifier = Modifier.padding(top = 4.dp)
             )
 
@@ -297,19 +298,19 @@ private fun SettingsSwitchRow(
             Text(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color(0xFFE9EDEF)
+                color = Palette.onSurface
             )
             Text(
                 summary,
                 style = MaterialTheme.typography.bodySmall,
-                color = Color(0xFF8696A0)
+                color = Palette.muted
             )
         }
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedTrackColor = Color(0xFF00A884),
+                checkedTrackColor = Palette.accent,
                 checkedThumbColor = Color.White
             )
         )

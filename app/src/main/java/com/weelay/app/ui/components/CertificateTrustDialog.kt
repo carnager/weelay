@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -29,10 +30,10 @@ fun CertificateTrustDialog(
     onTrust: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val warning = Color(0xFFE57373)
+    val warning = Palette.danger
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         title = {
             Text(if (certificate.replacesPinned) "Certificate changed" else "Untrusted certificate")
         },
@@ -62,7 +63,7 @@ fun CertificateTrustDialog(
                         certificate.sha256,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 12.sp,
-                        color = Color(0xFFE9EDEF),
+                        color = Palette.onSurface,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
@@ -71,7 +72,7 @@ fun CertificateTrustDialog(
                         "Issuer: ${certificate.issuer}\n" +
                         "Expires: ${DateFormat.getDateInstance().format(certificate.notAfter)}",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF8696A0),
+                    color = Palette.muted,
                     modifier = Modifier.padding(top = 12.dp)
                 )
                 Text(
@@ -79,7 +80,7 @@ fun CertificateTrustDialog(
                         "-noout -fingerprint -sha256",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF8696A0),
+                    color = Palette.muted,
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }

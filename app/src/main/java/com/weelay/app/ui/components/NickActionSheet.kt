@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,7 +35,7 @@ import androidx.compose.ui.unit.sp
 data class NickAction(
     val label: String,
     val icon: ImageVector,
-    val tint: Color = Color(0xFFE9EDEF),
+    val tint: Color = Palette.onSurface,
     val onClick: () -> Unit
 )
 
@@ -72,13 +73,13 @@ fun NickActionSheet(
                 NickAction(
                     label = "Kick",
                     icon = Icons.Default.PersonRemove,
-                    tint = Color(0xFFE57373),
+                    tint = Palette.danger,
                     onClick = onKick
                 ),
                 NickAction(
                     label = "Ban",
                     icon = Icons.Default.Block,
-                    tint = Color(0xFFE57373),
+                    tint = Palette.danger,
                     onClick = onBan
                 ),
                 NickAction(
@@ -94,7 +95,7 @@ fun NickActionSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = Color(0xFF1F2C34),
+        containerColor = Palette.surface,
         dragHandle = null
     ) {
         Column(
@@ -115,7 +116,7 @@ fun NickActionSheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            HorizontalDivider(color = Color(0xFF233039))
+            HorizontalDivider(color = Palette.divider)
 
             Spacer(modifier = Modifier.height(8.dp))
 

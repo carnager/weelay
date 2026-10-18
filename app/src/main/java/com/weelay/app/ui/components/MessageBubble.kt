@@ -1,5 +1,6 @@
 package com.weelay.app.ui.components
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -81,19 +82,19 @@ fun MessageBubble(
     // the user gets a warmer bubble so it's findable while scrolling, not just via the buffer
     // list badge.
     val bubbleColor = when {
-        isOwnMessage -> Color(0xFF005C4B) // WhatsApp dark green
-        message.isMention -> Color(0xFF3D3323) // amber-tinted dark for mentions
-        else -> Color(0xFF1F2C34) // WhatsApp dark grey bubble
+        isOwnMessage -> Palette.ownBubble // WhatsApp dark green
+        message.isMention -> Palette.mentionBubble // amber-tinted dark for mentions
+        else -> Palette.surface // WhatsApp dark grey bubble
     }
-    val mentionAccent = Color(0xFFFFB300)
+    val mentionAccent = Palette.accent
 
-    val textColor = Color(0xFFE9EDEF) // Light text for dark bubbles
-    val timeColor = Color(0xFF8696A0) // Muted grey for timestamps
-    val linkColor = Color(0xFF53BDEB) // WhatsApp-style link blue
+    val textColor = Palette.onSurface // Light text for dark bubbles
+    val timeColor = Palette.muted // Muted grey for timestamps
+    val linkColor = Palette.link // WhatsApp-style link blue
 
     val uriHandler = LocalUriHandler.current
 
-    val searchHighlightColor = Color(0xFFFFD54F) // Yellow highlight for search matches
+    val searchHighlightColor = Palette.searchMatch // Yellow highlight for search matches
 
     val annotatedText = remember(message.text, searchQuery, message.isAction, nickColorValue) {
         buildAnnotatedString {
@@ -171,7 +172,7 @@ fun MessageBubble(
                     // The jump-target outline (from the highlights sheet) is transient and wins;
                     // the mention outline is a permanent property of the message.
                     when {
-                        isHighlighted -> Modifier.border(1.5.dp, Color(0xFFFFD54F), bubbleShape)
+                        isHighlighted -> Modifier.border(1.5.dp, Palette.searchMatch, bubbleShape)
                         message.isMention && !isOwnMessage ->
                             Modifier.border(1.dp, mentionAccent, bubbleShape)
                         else -> Modifier

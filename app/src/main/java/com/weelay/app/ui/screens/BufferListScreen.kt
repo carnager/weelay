@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -80,18 +81,18 @@ fun BufferListScreen(
         ModalBottomSheet(
             onDismissRequest = { actionsFor = null },
             sheetState = rememberModalBottomSheetState(),
-            containerColor = Color(0xFF1F2C34),
+            containerColor = Palette.surface,
             dragHandle = null
         ) {
             Column(modifier = Modifier.padding(vertical = 12.dp)) {
                 Text(
                     buffer.displayName,
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFFE9EDEF),
+                    color = Palette.onSurface,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                 )
                 if (buffer.unreadCount > 0) {
-                    BufferActionRow(Icons.Default.DoneAll, "Mark as read", Color(0xFFE9EDEF)) {
+                    BufferActionRow(Icons.Default.DoneAll, "Mark as read", Palette.onSurface) {
                         viewModel.markRead(buffer.fullName)
                         actionsFor = null
                     }
@@ -99,7 +100,7 @@ fun BufferListScreen(
                 BufferActionRow(
                     Icons.Default.Close,
                     if (buffer.isChannel) "Leave and close" else "Close buffer",
-                    Color(0xFFE57373)
+                    Palette.danger
                 ) {
                     confirmClose = buffer
                     actionsFor = null
@@ -111,7 +112,7 @@ fun BufferListScreen(
     confirmClose?.let { buffer ->
         AlertDialog(
             onDismissRequest = { confirmClose = null },
-            containerColor = Color(0xFF1F2C34),
+            containerColor = Palette.surface,
             text = {
                 Text(
                     if (buffer.isChannel) "Leave ${buffer.displayName} and close its buffer?"
@@ -122,7 +123,7 @@ fun BufferListScreen(
                 TextButton(onClick = {
                     viewModel.closeBuffer(buffer.fullName)
                     confirmClose = null
-                }) { Text(if (buffer.isChannel) "Leave" else "Close", color = Color(0xFFE57373)) }
+                }) { Text(if (buffer.isChannel) "Leave" else "Close", color = Palette.danger) }
             },
             dismissButton = {
                 TextButton(onClick = { confirmClose = null }) { Text("Cancel") }
@@ -151,7 +152,7 @@ fun BufferListScreen(
                             fontSize = 20.sp,
                             fontWeight = FontWeight.SemiBold
                         ),
-                        color = Color(0xFFE9EDEF)
+                        color = Palette.onSurface
                     )
                 },
                 actions = {
@@ -162,23 +163,23 @@ fun BufferListScreen(
                         Icon(
                             imageVector = Icons.Default.Notifications,
                             contentDescription = "Highlights",
-                            tint = Color(0xFF8696A0)
+                            tint = Palette.muted
                         )
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = "Settings",
-                            tint = Color(0xFF8696A0)
+                            tint = Palette.muted
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1F2C34)
+                    containerColor = Palette.surface
                 )
             )
         },
-        containerColor = Color(0xFF0B141A)
+        containerColor = Palette.background
     ) { padding ->
         Column(
             modifier = Modifier
@@ -196,8 +197,8 @@ fun BufferListScreen(
                 }
                 val bannerColor = when (connectionState) {
                     com.weelay.app.relay.ConnectionState.RECONNECTING,
-                    com.weelay.app.relay.ConnectionState.CONNECTING -> Color(0xFF8D6E00)
-                    else -> Color(0xFFB71C1C)
+                    com.weelay.app.relay.ConnectionState.CONNECTING -> Palette.bannerProgress
+                    else -> Palette.bannerError
                 }
                 Box(
                     modifier = Modifier
@@ -219,7 +220,7 @@ fun BufferListScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFF1F2C34))
+                        .background(Palette.surface)
                         .padding(start = 16.dp, top = 8.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -227,12 +228,12 @@ fun BufferListScreen(
                         Text(
                             "Share to…",
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color(0xFF00A884)
+                            color = Palette.accent
                         )
                         Text(
                             shareText,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFF8696A0),
+                            color = Palette.muted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -241,7 +242,7 @@ fun BufferListScreen(
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Cancel sharing",
-                            tint = Color(0xFF8696A0)
+                            tint = Palette.muted
                         )
                     }
                 }
@@ -255,7 +256,7 @@ fun BufferListScreen(
                     Text(
                         text = "No buffers",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFF8696A0)
+                        color = Palette.muted
                     )
                 }
             } else {
@@ -270,7 +271,7 @@ fun BufferListScreen(
                         )
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 76.dp),
-                            color = Color(0xFF233039)
+                            color = Palette.divider
                         )
                     }
                 }
@@ -307,7 +308,7 @@ private fun BufferListItem(
     onLongClick: () -> Unit
 ) {
     val avatarColor = if (buffer.isChannel) {
-        Color(0xFF00A884)
+        Palette.accent
     } else {
         nickColor(buffer.displayName)
     }
@@ -366,7 +367,7 @@ private fun BufferListItem(
                         fontSize = 17.sp,
                         fontWeight = if (buffer.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
                     ),
-                    color = Color(0xFFE9EDEF),
+                    color = Palette.onSurface,
                     modifier = Modifier.weight(1f)
                 )
                 if (buffer.lastMessageTime.isNotEmpty()) {
@@ -376,8 +377,8 @@ private fun BufferListItem(
                             fontSize = 12.sp
                         ),
                         color = if (buffer.unreadCount > 0)
-                            Color(0xFF00A884)
-                        else Color(0xFF8696A0)
+                            Palette.accent
+                        else Palette.muted
                     )
                 }
             }
@@ -394,7 +395,7 @@ private fun BufferListItem(
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 14.sp
                     ),
-                    color = Color(0xFF8696A0),
+                    color = Palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
@@ -408,7 +409,7 @@ private fun BufferListItem(
                         containerColor = if (buffer.highlightCount > 0) {
                             Color(0xFFE53935)
                         } else {
-                            Color(0xFF00A884)
+                            Palette.accent
                         }
                     ) {
                         Text(

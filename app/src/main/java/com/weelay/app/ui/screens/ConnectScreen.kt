@@ -1,5 +1,6 @@
 package com.weelay.app.ui.screens
 
+import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,15 +75,15 @@ fun ConnectScreen(
                 Text(
                     text = "Weelay",
                     style = MaterialTheme.typography.headlineLarge,
-                    color = Color(0xFF00A884)
+                    color = Palette.accent
                 )
                 Spacer(modifier = Modifier.height(24.dp))
-                CircularProgressIndicator(color = Color(0xFF00A884))
+                CircularProgressIndicator(color = Palette.accent)
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     text = "Connecting...",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFF8696A0)
+                    color = Palette.muted
                 )
             }
         }
@@ -103,7 +104,7 @@ fun ConnectScreen(
             Text(
                 text = "Weelay",
                 style = MaterialTheme.typography.headlineLarge,
-                color = Color(0xFF00A884)
+                color = Palette.accent
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -111,7 +112,7 @@ fun ConnectScreen(
             Text(
                 text = "WeeChat Relay Client",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color(0xFF8696A0)
+                color = Palette.muted
             )
 
             Spacer(modifier = Modifier.height(48.dp))
