@@ -1,22 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Monochrome status-bar icon: the launcher glyph, cropped to its own bounds. -->
+<!-- Status-bar icon: the launcher icon's monochrome layer, cropped to the artwork's bounds. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="40"
-    android:viewportHeight="40">
+    android:viewportWidth="56"
+    android:viewportHeight="56">
     <group
-        android:translateX="-34"
-        android:translateY="-34">
+        android:translateX="-26"
+        android:translateY="-27">
         <path
-            android:pathData="M38,44 C38,44 42,36 54,36 C66,36 70,44 70,44 L70,64 C70,64 66,72 54,72 C42,72 38,64 38,64 Z"
-            android:strokeWidth="3.5"
-            android:strokeColor="#FFFFFFFF"
-            android:fillColor="#00000000"/>
+            android:pathData="M54,30 H70 Q80,30 80,40 V49 Q80,55 75,57 L78,62 L73,59 V53 Q73,41 61,41 H44 V40 Q44,30 54,30 Z"
+            android:fillColor="#FFFFFFFF" />
         <path
-            android:pathData="M46,52 L54,44 L62,52 M46,56 L54,64 L62,56"
-            android:strokeWidth="3.5"
-            android:strokeColor="#FFFFFFFF"
-            android:fillColor="#00000000"/>
+            android:pathData="M39,43 H61 Q71,43 71,53 V63 Q71,72 61,72 H47 L36,79 L37,71 Q28,70 28,61 V54 Q28,43 39,43 Z M36,52 L47,54 Q46,60 41,60 Q36,60 36,52 Z M53,53 Q56,49 63,50 L63,54 Q63,60 58,60 Q53,60 53,53 Z M43,63 Q51,67 61,61 Q57,69 50,68 Q46,67 43,63 Z"
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd" />
+        <path
+            android:pathData="M44,54 A2,3 0,1 0,44,60 A2,3 0,1 0,44,54 Z"
+            android:fillColor="#FFFFFFFF" />
+        <path
+            android:pathData="M60,53 A2,3 0,1 0,60,59 A2,3 0,1 0,60,53 Z"
+            android:fillColor="#FFFFFFFF" />
     </group>
 </vector>
