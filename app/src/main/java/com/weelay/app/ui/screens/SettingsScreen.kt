@@ -54,6 +54,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.weelay.app.data.MessageLayout
+import com.weelay.app.ui.theme.AppStyle
 import com.weelay.app.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -220,15 +222,23 @@ fun SettingsScreen(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            LayoutChoiceRow(
-                title = "Channels",
-                compact = uiState.compactChannels,
-                onChange = viewModel::onCompactChannelsChange
+            ChoiceRow(
+                title = "Style",
+                options = listOf(AppStyle.RELAY to "Relay", AppStyle.THREADS to "Threads"),
+                selected = uiState.style,
+                onChange = viewModel::onStyleChange
             )
-            LayoutChoiceRow(
-                title = "Private chats",
-                compact = uiState.compactPrivate,
-                onChange = viewModel::onCompactPrivateChange
+            ChoiceRow(
+                title = "Channel messages",
+                options = LAYOUT_OPTIONS,
+                selected = uiState.channelLayout,
+                onChange = viewModel::onChannelLayoutChange
+            )
+            ChoiceRow(
+                title = "Private chat messages",
+                options = LAYOUT_OPTIONS,
+                selected = uiState.privateLayout,
+                onChange = viewModel::onPrivateLayoutChange
             )
 
             SettingsSwitchRow(
@@ -295,28 +305,34 @@ fun SettingsScreen(
     }
 }
 
-/** Choose between compact IRC lines and chat bubbles for one kind of buffer. */
+private val LAYOUT_OPTIONS = listOf(MessageLayout.LINES to "Lines", MessageLayout.GROUPED to "Grouped", MessageLayout.BUBBLES to "Bubbles")
+
+/** A titled set of mutually exclusive options, as segmented buttons under the title. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LayoutChoiceRow(title: String, compact: Boolean, onChange: (Boolean) -> Unit) {
-    Row(
+private fun <T> ChoiceRow(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onChange: (T) -> Unit
+) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 6.dp)
     ) {
         Text(
             title,
             style = MaterialTheme.typography.bodyLarge,
             color = Palette.onSurface,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.padding(bottom = 6.dp)
         )
-        SingleChoiceSegmentedButtonRow {
-            listOf(true to "Lines", false to "Bubbles").forEachIndexed { index, (value, label) ->
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (value, label) ->
                 SegmentedButton(
-                    selected = compact == value,
+                    selected = selected == value,
                     onClick = { onChange(value) },
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
                     colors = SegmentedButtonDefaults.colors(
                         activeContainerColor = Palette.accent,
                         activeContentColor = Palette.onAccent,

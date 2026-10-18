@@ -3,9 +3,20 @@ package com.weelay.app.data
 import android.app.Application
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
+import com.weelay.app.ui.theme.AppStyle
 import com.weelay.app.viewmodel.ConnectUiState
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** How a buffer's messages are drawn. */
+enum class MessageLayout {
+    /** One line per message: time, nick column, text — like WeeChat itself. */
+    LINES,
+    /** A nick header over each run of messages, without bubbles. */
+    GROUPED,
+    /** Chat bubbles. */
+    BUBBLES
+}
 
 @Singleton
 class ConnectionPrefs @Inject constructor(application: Application) {
@@ -89,21 +100,33 @@ class ConnectionPrefs @Inject constructor(application: Application) {
             prefs.edit().putString(KEY_PINNED_CERT, value).apply()
         }
 
-    /**
-     * Message layout per kind of buffer: compact IRC lines (true) or chat bubbles (false). Busy
-     * channels read better as lines; one-to-one conversations suit bubbles.
-     */
-    var compactChannels: Boolean
-        get() = prefs.getBoolean(KEY_COMPACT_CHANNELS, true)
+    /** The app's look: colours and buffer-list design. */
+    var style: AppStyle
+        get() = enumPref(KEY_STYLE, AppStyle.RELAY)
         set(value) {
-            prefs.edit().putBoolean(KEY_COMPACT_CHANNELS, value).apply()
+            prefs.edit().putString(KEY_STYLE, value.name).apply()
         }
 
-    var compactPrivate: Boolean
-        get() = prefs.getBoolean(KEY_COMPACT_PRIVATE, false)
+    /**
+     * Message layout per kind of buffer. Busy channels read best as lines; one-to-one
+     * conversations suit bubbles; grouped sits between the two.
+     */
+    var channelLayout: MessageLayout
+        get() = enumPref(KEY_CHANNEL_LAYOUT, MessageLayout.LINES)
         set(value) {
-            prefs.edit().putBoolean(KEY_COMPACT_PRIVATE, value).apply()
+            prefs.edit().putString(KEY_CHANNEL_LAYOUT, value.name).apply()
         }
+
+    var privateLayout: MessageLayout
+        get() = enumPref(KEY_PRIVATE_LAYOUT, MessageLayout.BUBBLES)
+        set(value) {
+            prefs.edit().putString(KEY_PRIVATE_LAYOUT, value.name).apply()
+        }
+
+    private inline fun <reified T : Enum<T>> enumPref(key: String, default: T): T =
+        prefs.getString(key, null)
+            ?.let { name -> enumValues<T>().firstOrNull { it.name == name } }
+            ?: default
 
     var hideSpecialBuffers: Boolean
         get() = prefs.getBoolean(KEY_HIDE_SPECIAL, false)
@@ -121,7 +144,8 @@ class ConnectionPrefs @Inject constructor(application: Application) {
         private const val KEY_HIGHLIGHT_WORDS = "highlight_words"
         private const val KEY_LINK_PREVIEWS = "link_previews"
         private const val KEY_PINNED_CERT = "pinned_cert_sha256"
-        private const val KEY_COMPACT_CHANNELS = "compact_channels"
-        private const val KEY_COMPACT_PRIVATE = "compact_private"
+        private const val KEY_STYLE = "style"
+        private const val KEY_CHANNEL_LAYOUT = "channel_layout"
+        private const val KEY_PRIVATE_LAYOUT = "private_layout"
     }
 }

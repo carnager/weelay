@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.ui.theme.Palette
 import com.weelay.app.service.RelayService
 import com.weelay.app.ui.components.CertificateTrustDialog
 import androidx.activity.SystemBarStyle
@@ -111,6 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Palette.style = connectionPrefs.style
         // The UI is always dark, so the system bars need light icons regardless of the system
         // theme; the default (auto) style draws dark icons over the dark top bar in light mode.
         enableEdgeToEdge(

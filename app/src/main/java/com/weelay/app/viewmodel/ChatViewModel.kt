@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.weelay.app.data.ConnectionPrefs
 import com.weelay.app.data.InputHistory
+import com.weelay.app.data.MessageLayout
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.MessageFormat
 import com.weelay.app.relay.RelayClient
@@ -76,9 +77,9 @@ class ChatViewModel @Inject constructor(
     /** Read once per screen; flipping the setting takes effect the next time a buffer opens. */
     val linkPreviews: Boolean get() = connectionPrefs.linkPreviews
 
-    /** Whether this kind of buffer uses the compact line layout rather than bubbles. */
-    fun compactLayout(channel: Boolean): Boolean =
-        if (channel) connectionPrefs.compactChannels else connectionPrefs.compactPrivate
+    /** The message layout chosen for this kind of buffer. */
+    fun messageLayout(channel: Boolean): MessageLayout =
+        if (channel) connectionPrefs.channelLayout else connectionPrefs.privateLayout
 
     /** What the user sent in this buffer, newest first; see [InputHistory]. */
     private val _sentHistory = MutableStateFlow<List<String>>(emptyList())

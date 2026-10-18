@@ -4,6 +4,10 @@ import com.weelay.app.ui.theme.Palette
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import com.weelay.app.ui.theme.AppStyle
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -160,13 +164,14 @@ fun BufferListScreen(
                         ConnectionState.DISCONNECTED -> "disconnected" to Palette.danger
                         ConnectionState.ERROR -> "connection lost" to Palette.danger
                     }
+                    val threads = Palette.style == AppStyle.THREADS
                     Column {
                         Text(
-                            "weelay",
+                            if (threads) "Weelay" else "weelay",
                             style = MaterialTheme.typography.titleLarge.copy(
-                                fontSize = 19.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                fontFamily = FontFamily.Monospace
+                                fontSize = if (threads) 24.sp else 21.sp,
+                                fontWeight = if (threads) FontWeight.Bold else FontWeight.SemiBold,
+                                fontFamily = if (threads) FontFamily.Default else FontFamily.Monospace
                             ),
                             color = Palette.onSurface
                         )
@@ -182,8 +187,8 @@ fun BufferListScreen(
                             Text(
                                 "$host · $status",
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace
+                                    fontSize = 12.sp,
+                                    fontFamily = if (threads) FontFamily.Default else FontFamily.Monospace
                                 ),
                                 color = Palette.muted
                             )
@@ -265,22 +270,36 @@ fun BufferListScreen(
                     )
                 }
             } else {
+                val threads = Palette.style == AppStyle.THREADS
+                var filter by remember { mutableStateOf("") }
+                val shown = remember(buffers, filter) {
+                    if (filter.isBlank()) buffers
+                    else buffers.filter { it.displayName.contains(filter.trim(), ignoreCase = true) }
+                }
                 val active = remember(buffers) { buffers.filter { it.unreadCount > 0 } }
                 // Sections in buffer order: each network's channels (and server buffer), then its
                 // private chats.
-                val sections = remember(buffers) {
-                    buffers.groupBy { it.network }.flatMap { (network, list) ->
+                val sections = remember(shown, threads) {
+                    shown.groupBy { it.network }.flatMap { (network, list) ->
                         val (private, rest) = list.partition { it.isPrivate }
                         listOfNotNull(
-                            rest.takeIf { it.isNotEmpty() }?.let { network to it },
-                            private.takeIf { it.isNotEmpty() }?.let { "$network · private" to it }
+                            rest.takeIf { it.isNotEmpty() }?.let {
+                                (if (threads) "Channels · $network" else network.uppercase()) to it
+                            },
+                            private.takeIf { it.isNotEmpty() }?.let {
+                                (if (threads) "Direct messages · $network" else "${network.uppercase()} · PRIVATE") to it
+                            }
                         )
                     }
                 }
                 LazyColumn(
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    if (active.isNotEmpty()) {
+                    if (threads) {
+                        item(key = "filter") {
+                            BufferFilterField(filter, onChange = { filter = it })
+                        }
+                    } else if (active.isNotEmpty()) {
                         item(key = "act") {
                             ActivityStrip(active, onClick = { onBufferClick(it.fullName) })
                         }
@@ -288,22 +307,31 @@ fun BufferListScreen(
                     sections.forEach { (title, list) ->
                         item(key = "section_$title") {
                             Text(
-                                title.uppercase(),
+                                title,
                                 style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = 11.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    letterSpacing = 0.8.sp
+                                    fontSize = if (threads) 13.sp else 12.sp,
+                                    fontWeight = if (threads) FontWeight.SemiBold else FontWeight.Normal,
+                                    fontFamily = if (threads) FontFamily.Default else FontFamily.Monospace,
+                                    letterSpacing = if (threads) 0.sp else 0.8.sp
                                 ),
                                 color = Palette.muted,
-                                modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 2.dp)
+                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
                             )
                         }
                         items(list, key = { it.fullName }) { buffer ->
-                            BufferListItem(
-                                buffer = buffer,
-                                onClick = { onBufferClick(buffer.fullName) },
-                                onLongClick = { actionsFor = buffer }
-                            )
+                            if (threads) {
+                                ThreadsListItem(
+                                    buffer = buffer,
+                                    onClick = { onBufferClick(buffer.fullName) },
+                                    onLongClick = { actionsFor = buffer }
+                                )
+                            } else {
+                                BufferListItem(
+                                    buffer = buffer,
+                                    onClick = { onBufferClick(buffer.fullName) },
+                                    onLongClick = { actionsFor = buffer }
+                                )
+                            }
                         }
                     }
                 }
@@ -328,7 +356,7 @@ private fun ActivityStrip(active: List<BufferDisplayItem>, onClick: (BufferDispl
     ) {
         Text(
             "act",
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp, fontFamily = FontFamily.Monospace),
             color = Palette.muted
         )
         active.forEach { buffer ->
@@ -336,7 +364,7 @@ private fun ActivityStrip(active: List<BufferDisplayItem>, onClick: (BufferDispl
             Text(
                 "${buffer.number}:${buffer.displayName.removePrefix("#")}",
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = if (highlight) FontWeight.Bold else FontWeight.Normal
                 ),
@@ -387,23 +415,23 @@ private fun BufferListItem(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 16.dp, vertical = 9.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // WeeChat's buffer number, so the list lines up with the desktop client and /buffer N.
         Text(
             text = buffer.number.toString(),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = mono),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 13.sp, fontFamily = mono),
             color = Palette.muted,
             textAlign = TextAlign.End,
-            modifier = Modifier.width(22.dp)
+            modifier = Modifier.width(24.dp)
         )
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = buffer.displayName,
                 style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 15.sp,
+                    fontSize = 17.sp,
                     fontFamily = mono,
                     fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal
                 ),
@@ -418,7 +446,7 @@ private fun BufferListItem(
             if (buffer.lastMessage.isNotEmpty()) {
                 Text(
                     text = buffer.lastMessage,
-                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
                     color = Palette.muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -429,7 +457,7 @@ private fun BufferListItem(
         Column(horizontalAlignment = Alignment.End) {
             Text(
                 text = buffer.lastMessageTime,
-                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontFamily = mono),
+                style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = mono),
                 color = Palette.muted
             )
             if (unread) {
@@ -439,7 +467,7 @@ private fun BufferListItem(
                 Text(
                     text = if (buffer.unreadCount > 99) "99+" else buffer.unreadCount.toString(),
                     style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontFamily = mono,
                         fontWeight = FontWeight.SemiBold
                     ),
@@ -452,6 +480,114 @@ private fun BufferListItem(
                         )
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                 )
+            }
+        }
+    }
+}
+
+/** Narrows the Threads buffer list by name as you type. */
+@Composable
+private fun BufferFilterField(value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        placeholder = { Text("Jump to buffer", color = Palette.muted) },
+        leadingIcon = {
+            Icon(Icons.Default.Search, contentDescription = null, tint = Palette.muted)
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedContainerColor = Palette.surface,
+            unfocusedContainerColor = Palette.surface,
+            focusedBorderColor = Palette.accent,
+            unfocusedBorderColor = Palette.divider,
+            focusedTextColor = Palette.onSurface,
+            unfocusedTextColor = Palette.onSurface,
+            cursorColor = Palette.accent
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+    )
+}
+
+/** A buffer row in the Threads style: a rounded glyph tile, name, preview and an unread pill. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ThreadsListItem(
+    buffer: BufferDisplayItem,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val unread = buffer.unreadCount > 0
+    val tint = if (buffer.isPrivate) nickColor(buffer.displayName) else Palette.accent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 14.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .background(tint.copy(alpha = 0.16f), RoundedCornerShape(11.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = if (buffer.isPrivate) {
+                    buffer.displayName.firstOrNull { it.isLetterOrDigit() }?.uppercase() ?: "?"
+                } else "#",
+                style = MaterialTheme.typography.titleMedium.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
+                color = tint
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = buffer.displayName.removePrefix("#"),
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 17.sp,
+                        fontWeight = if (unread) FontWeight.SemiBold else FontWeight.Normal
+                    ),
+                    color = Palette.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = buffer.lastMessageTime,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
+                    color = Palette.muted
+                )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = buffer.lastMessage,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp),
+                    color = Palette.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (unread) {
+                    val highlight = buffer.highlightCount > 0
+                    Text(
+                        text = (if (highlight) "@ " else "") +
+                            if (buffer.unreadCount > 99) "99+" else buffer.unreadCount.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                        color = if (highlight) Palette.onAccent else Palette.onSurface,
+                        modifier = Modifier
+                            .padding(start = 8.dp)
+                            .background(
+                                if (highlight) Palette.accent else Palette.surfaceRaised,
+                                RoundedCornerShape(50)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 1.dp)
+                    )
+                }
             }
         }
     }

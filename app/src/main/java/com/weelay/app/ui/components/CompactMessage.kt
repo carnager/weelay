@@ -56,11 +56,11 @@ fun CompactMessageRow(
     ) {
         Text(
             text = message.time,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp, fontFamily = mono),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp, fontFamily = mono),
             color = Palette.muted,
             modifier = Modifier
-                .width(38.dp)
-                .padding(top = 3.dp)
+                .width(42.dp)
+                .padding(top = 4.dp)
         )
         val nickLabel = when {
             message.isAction -> "*"
@@ -70,8 +70,8 @@ fun CompactMessageRow(
         Text(
             text = nickLabel,
             style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 13.sp,
-                lineHeight = 20.sp,
+                fontSize = 14.sp,
+                lineHeight = 22.sp,
                 fontFamily = mono,
                 fontWeight = if (mention) FontWeight.Bold else FontWeight.Normal
             ),
@@ -84,7 +84,7 @@ fun CompactMessageRow(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier
-                .width(84.dp)
+                .width(88.dp)
                 .then(
                     if (onNickClick != null && nickLabel.isNotEmpty() && !message.isAction) {
                         Modifier.clickable { onNickClick(nick) }
@@ -99,8 +99,8 @@ fun CompactMessageRow(
             MessageText(
                 text = text,
                 style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp,
                     color = Palette.onSurface
                 ),
                 onLongPress = onLongPress

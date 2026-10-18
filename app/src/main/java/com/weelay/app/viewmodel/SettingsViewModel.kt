@@ -3,6 +3,9 @@ package com.weelay.app.viewmodel
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.data.MessageLayout
+import com.weelay.app.ui.theme.AppStyle
+import com.weelay.app.ui.theme.Palette
 import com.weelay.app.relay.RelayClient
 import com.weelay.app.service.RelayService
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -20,8 +23,9 @@ data class SettingsUiState(
     val hideSpecialBuffers: Boolean = false,
     val highlightWords: String = "",
     val linkPreviews: Boolean = true,
-    val compactChannels: Boolean = true,
-    val compactPrivate: Boolean = false
+    val style: AppStyle = AppStyle.RELAY,
+    val channelLayout: MessageLayout = MessageLayout.LINES,
+    val privateLayout: MessageLayout = MessageLayout.BUBBLES
 )
 
 @HiltViewModel
@@ -44,8 +48,9 @@ class SettingsViewModel @Inject constructor(
             hideSpecialBuffers = connectionPrefs.hideSpecialBuffers,
             highlightWords = connectionPrefs.highlightWords,
             linkPreviews = connectionPrefs.linkPreviews,
-            compactChannels = connectionPrefs.compactChannels,
-            compactPrivate = connectionPrefs.compactPrivate
+            style = connectionPrefs.style,
+            channelLayout = connectionPrefs.channelLayout,
+            privateLayout = connectionPrefs.privateLayout
         )
     }
 
@@ -85,14 +90,21 @@ class SettingsViewModel @Inject constructor(
         connectionPrefs.highlightWords = words
     }
 
-    fun onCompactChannelsChange(compact: Boolean) {
-        _uiState.update { it.copy(compactChannels = compact) }
-        connectionPrefs.compactChannels = compact
+    fun onStyleChange(style: AppStyle) {
+        _uiState.update { it.copy(style = style) }
+        connectionPrefs.style = style
+        // Recolours every screen immediately; see Palette.
+        Palette.style = style
     }
 
-    fun onCompactPrivateChange(compact: Boolean) {
-        _uiState.update { it.copy(compactPrivate = compact) }
-        connectionPrefs.compactPrivate = compact
+    fun onChannelLayoutChange(layout: MessageLayout) {
+        _uiState.update { it.copy(channelLayout = layout) }
+        connectionPrefs.channelLayout = layout
+    }
+
+    fun onPrivateLayoutChange(layout: MessageLayout) {
+        _uiState.update { it.copy(privateLayout = layout) }
+        connectionPrefs.privateLayout = layout
     }
 
     fun onLinkPreviewsChange(enabled: Boolean) {

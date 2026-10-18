@@ -115,6 +115,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.ui.components.HighlightsSheet
 import com.weelay.app.ui.components.CompactMessageRow
+import com.weelay.app.ui.components.GroupedMessageRow
+import com.weelay.app.data.MessageLayout
 import com.weelay.app.ui.components.MessageBubble
 import com.weelay.app.ui.components.NickActionSheet
 import com.weelay.app.ui.theme.nickColor
@@ -149,7 +151,7 @@ fun ChatScreen(
     val bufferTitle by viewModel.bufferTitle.collectAsState()
     val isChannel by viewModel.isChannel.collectAsState()
     val showLinkPreviews = remember { viewModel.linkPreviews }
-    val compact = remember(isChannel) { viewModel.compactLayout(isChannel) }
+    val layout = remember(isChannel) { viewModel.messageLayout(isChannel) }
     var showTopic by remember { mutableStateOf(false) }
     var messageMenuFor by remember { mutableStateOf<Pair<MessageGroup, DisplayMessage>?>(null) }
     // A kick or ban waiting for confirmation: the command to send, and a description of it.
@@ -851,8 +853,8 @@ fun ChatScreen(
                                         messageMenuFor = group to message
                                     }
                                     val query = if (showSearch && searchQuery.length >= 2) searchQuery else null
-                                    if (compact) {
-                                        CompactMessageRow(
+                                    when (layout) {
+                                    MessageLayout.LINES -> CompactMessageRow(
                                             message = message,
                                             nick = group.nick,
                                             nickColor = group.nickColor,
@@ -863,8 +865,18 @@ fun ChatScreen(
                                             onNickClick = insertNick,
                                             onLongPress = openMenu
                                         )
-                                    } else {
-                                        MessageBubble(
+                                    MessageLayout.GROUPED -> GroupedMessageRow(
+                                            message = message,
+                                            nick = group.nick,
+                                            nickColor = group.nickColor,
+                                            isFirstInGroup = message == group.messages.first(),
+                                            searchQuery = query,
+                                            isHighlighted = message.id == highlightedMessageId,
+                                            showLinkPreview = showLinkPreviews,
+                                            onNickClick = insertNick,
+                                            onLongPress = openMenu
+                                        )
+                                    MessageLayout.BUBBLES -> MessageBubble(
                                             message = message,
                                             isFirstInGroup = message == group.messages.first(),
                                             isLastInGroup = message == group.messages.last(),

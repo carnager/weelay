@@ -6,7 +6,9 @@ import androidx.compose.runtime.Composable
 
 // Material components that aren't styled by hand (dialogs, text fields, menus, switches) take
 // their colours from here, so it mirrors Palette rather than following Material You.
-private val WeelayColorScheme = darkColorScheme(
+// Built inside the composable so it follows Palette.style.
+@Composable
+private fun weelayColorScheme() = darkColorScheme(
     primary = Palette.accent,
     onPrimary = Palette.onAccent,
     secondary = Palette.link,
@@ -26,7 +28,7 @@ private val WeelayColorScheme = darkColorScheme(
 @Composable
 fun WeelayTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = WeelayColorScheme,
+        colorScheme = weelayColorScheme(),
         typography = Typography,
         content = content
     )
