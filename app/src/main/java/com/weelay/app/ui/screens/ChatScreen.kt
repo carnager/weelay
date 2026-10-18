@@ -46,6 +46,15 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.History
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -136,6 +145,17 @@ fun ChatScreen(
     // A kick or ban waiting for confirmation: the command to send, and a description of it.
     var pendingModAction by remember { mutableStateOf<Pair<String, String>?>(null) }
     var inputText by remember { mutableStateOf(TextFieldValue("")) }
+    val sentHistory by viewModel.sentHistory.collectAsState()
+    var showHistoryMenu by remember { mutableStateOf(false) }
+    // Hardware-keyboard recall: which history entry is in the input (-1 = none), and what was
+    // typed before recalling started, so Down past the newest entry gives it back.
+    var historyIndex by remember { mutableStateOf(-1) }
+    var historyDraft by remember { mutableStateOf("") }
+    fun recall(index: Int) {
+        val text = if (index < 0) historyDraft else sentHistory[index]
+        historyIndex = index
+        inputText = TextFieldValue(text, TextRange(text.length))
+    }
     val listState = rememberLazyListState()
     var selectedNick by remember { mutableStateOf<String?>(null) }
     var showNicklist by remember { mutableStateOf(false) }
@@ -917,13 +937,78 @@ fun ChatScreen(
             ) {
                 OutlinedTextField(
                     value = inputText,
-                    onValueChange = { inputText = it },
+                    onValueChange = {
+                        // Editing a recalled entry makes it a new draft rather than history.
+                        if (it.text != inputText.text) historyIndex = -1
+                        inputText = it
+                    },
                     placeholder = {
                         Text("Message", color = Color(0xFF8696A0))
                     },
+                    trailingIcon = if (inputText.text.isEmpty() && sentHistory.isNotEmpty()) {
+                        {
+                            Box {
+                                IconButton(onClick = { showHistoryMenu = true }) {
+                                    Icon(
+                                        imageVector = Icons.Default.History,
+                                        contentDescription = "Sent messages",
+                                        tint = Color(0xFF8696A0)
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = showHistoryMenu,
+                                    onDismissRequest = { showHistoryMenu = false },
+                                    modifier = Modifier
+                                        .background(Color(0xFF1F2C34))
+                                        .widthIn(max = 320.dp)
+                                ) {
+                                    sentHistory.take(15).forEach { entry ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    entry,
+                                                    color = Color(0xFFE9EDEF),
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            onClick = {
+                                                showHistoryMenu = false
+                                                inputText = TextFieldValue(entry, TextRange(entry.length))
+                                                inputFieldFocusRequester.requestFocus()
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else null,
                     modifier = Modifier
                         .weight(1f)
-                        .focusRequester(inputFieldFocusRequester),
+                        .focusRequester(inputFieldFocusRequester)
+                        // Up/Down on a hardware keyboard step through what was sent, as in
+                        // WeeChat. Up only takes over while the input is empty or already showing
+                        // a recalled entry, so it still moves the cursor in a typed draft.
+                        .onPreviewKeyEvent { event ->
+                            if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    val browsing = historyIndex >= 0 || inputText.text.isEmpty()
+                                    if (!browsing || historyIndex >= sentHistory.size - 1) {
+                                        return@onPreviewKeyEvent false
+                                    }
+                                    if (historyIndex < 0) historyDraft = inputText.text
+                                    recall(historyIndex + 1)
+                                    true
+                                }
+                                Key.DirectionDown -> {
+                                    if (historyIndex < 0) return@onPreviewKeyEvent false
+                                    recall(historyIndex - 1)
+                                    true
+                                }
+                                else -> false
+                            }
+                        },
                     shape = MaterialTheme.shapes.extraLarge,
                     singleLine = false,
                     maxLines = 4,
@@ -946,7 +1031,8 @@ fun ChatScreen(
                             } else {
                                 inputText.text.trim()
                             }
-                            if (viewModel.sendMessage(msg)) {
+                            if (viewModel.sendTypedInput(msg)) {
+                                historyIndex = -1
                                 inputText = TextFieldValue("")
                                 replyToNick = null
                                 replyToMessage = null

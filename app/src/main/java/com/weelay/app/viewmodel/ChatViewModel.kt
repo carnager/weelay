@@ -4,6 +4,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.weelay.app.data.ConnectionPrefs
+import com.weelay.app.data.InputHistory
 import com.weelay.app.relay.ConnectionState
 import com.weelay.app.relay.MessageFormat
 import com.weelay.app.relay.RelayClient
@@ -53,7 +54,8 @@ data class MessageGroup(
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val relayClient: RelayClient,
-    private val connectionPrefs: ConnectionPrefs
+    private val connectionPrefs: ConnectionPrefs,
+    private val inputHistory: InputHistory
 ) : ViewModel() {
 
     val connectionState: StateFlow<ConnectionState> = relayClient.connectionState
@@ -73,6 +75,10 @@ class ChatViewModel @Inject constructor(
 
     /** Read once per screen; flipping the setting takes effect the next time a buffer opens. */
     val linkPreviews: Boolean get() = connectionPrefs.linkPreviews
+
+    /** What the user sent in this buffer, newest first; see [InputHistory]. */
+    private val _sentHistory = MutableStateFlow<List<String>>(emptyList())
+    val sentHistory: StateFlow<List<String>> = _sentHistory.asStateFlow()
 
     private val _nicklist = MutableStateFlow<List<RelayNicklistEntry>>(emptyList())
     val nicklist: StateFlow<List<RelayNicklistEntry>> = _nicklist.asStateFlow()
@@ -149,6 +155,7 @@ class ChatViewModel @Inject constructor(
         bufferJobs.clear()
 
         currentBufferFullName = bufferFullName
+        _sentHistory.value = inputHistory.forBuffer(bufferFullName)
         allLines.clear()
         displayMessages.clear()
         groups.clear()
@@ -247,6 +254,19 @@ class ChatViewModel @Inject constructor(
     /** Returns true if the message reached an open connection, false if it was dropped. */
     fun sendMessage(text: String): Boolean {
         return relayClient.sendInput(currentBufferFullName, text)
+    }
+
+    /**
+     * Send what the user typed into the input bar and remember it for recall. Kept apart from
+     * [sendMessage] so commands the UI issues on the user's behalf (kick, ban, …) stay out of it.
+     */
+    fun sendTypedInput(text: String): Boolean {
+        val sent = relayClient.sendInput(currentBufferFullName, text)
+        if (sent) {
+            inputHistory.add(currentBufferFullName, text)
+            _sentHistory.value = inputHistory.forBuffer(currentBufferFullName)
+        }
+        return sent
     }
 
     /** Called when this buffer becomes visible — marks it active so its unread count is cleared. */
